@@ -1,8 +1,78 @@
-# Ignore local data
-data/
+# ============================================================================
+# Large Dataset Isolation - Audio Files (FLAC/100MB+)
+# ============================================================================
+# Raw audio data and processed output (typically 100MB+)
+data/raw/**/*.flac
+data/raw/**/*.wav
+data/raw/**/*.mp3
+data/raw/**/*.m4a
+data/processed/**/*.flac
+data/processed/**/*.wav
 
-# Ignore Python cache and Jupyter checkpoints
+# General binary/media files exceeding 100MB
+*.flac
+*.wav
+*.mp3
+*.m4a
+
+# Keep directory structure for documentation
+!data/
+!data/raw/
+!data/processed/
+!data/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# ============================================================================
+# Python Environment & Cache
+# ============================================================================
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ============================================================================
+# Jupyter Notebooks & IDE
+# ============================================================================
 .ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
+.env
+.env.local
+
+# ============================================================================
+# Project-Specific Exclusions
+# ============================================================================
+# Temporary test files
+*.tmp
+*.log
+.pytest_cache/
+
+# OS Files
+Thumbs.db
