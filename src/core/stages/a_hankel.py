@@ -18,6 +18,9 @@ class AHankelStage(MSSAStage[FloatArray, Tuple[FloatArray, FloatArray]]):
 
     def execute(self, data: FloatArray) -> Tuple[FloatArray, FloatArray]:
         """Embed a time series into its Hankel matrix representation."""
+        if not data.flags["C_CONTIGUOUS"]:
+            data = np.ascontiguousarray(data)
+
         n = data.shape[0]
         k = n - self.window_length + 1
 

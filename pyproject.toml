@@ -1,7 +1,6 @@
 [tool.ruff]
 line-length = 88
 select = ["E", "F", "I", "N", "UP"]
-import-order = "google"
 fix = true
 
 [tool.mypy]
