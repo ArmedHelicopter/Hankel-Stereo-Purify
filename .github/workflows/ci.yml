@@ -1,0 +1,54 @@
+name: Hankel-Stereo-Purify CI
+
+# 触发条件：推送到主分支或发起 Pull Request 时触发
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    # 策略：测试多个 Python 版本，这里以最低支持 3.10 为基准
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        # 开启 pip 缓存，加快流水线执行速度
+        cache: 'pip'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -r requirements.txt
+        python -m pip install -r requirements-dev.txt
+
+    - name: Code Quality & Linting (Ruff)
+      run: |
+        # 运行 Ruff 检查代码格式和潜在错误
+        # --output-format=github 会在 PR 的代码行内直接显示警告
+        ruff check . --output-format=github
+
+    - name: Static Type Checking (Mypy)
+      env:
+        PYTHONPATH: src
+      run: |
+        # 运行严格的静态类型检查，确保 FloatArray 等张量契约未被破坏
+        mypy src/ tests/
+
+    - name: Mathematical & Memory Baselines (Pytest)
+      env:
+        PYTHONPATH: src
+      run: |
+        # 运行测试驱动框架，重点验证零拷贝 (np.shares_memory) 和数学准确性
+        pytest tests/ --cov=src --cov-report=term-missing

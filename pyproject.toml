@@ -1,0 +1,17 @@
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I", "N", "UP"]
+import-order = "google"
+fix = true
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+show_error_codes = true
+pretty = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_no_return = true
+no_implicit_optional = true
+namespace_packages = true

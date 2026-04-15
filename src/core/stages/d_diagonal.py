@@ -1,9 +1,13 @@
-from typing import Any
+from ..pipeline import FloatArray, MSSAStage
 
 
-class DDiagonalStage:
-    """Diagonal averaging reconstruction stage for MSSA."""
+class DDiagonalStage(MSSAStage[FloatArray, FloatArray]):
+    """Diagonal averaging reconstruction stage for MSSA.
 
-    def execute(self, data: Any) -> Any:
+    Input: FloatArray, shape (L, 2K)
+    Output: FloatArray, shape (N, 2)
+    """
+
+    def execute(self, data: FloatArray) -> FloatArray:
         """Reconstruct the denoised time series from the truncated matrix."""
         raise NotImplementedError

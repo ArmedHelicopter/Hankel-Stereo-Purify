@@ -33,6 +33,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 build/
 develop-eggs/
@@ -49,6 +50,8 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.ruff_cache/
+.mypy_cache/
 
 # ============================================================================
 # Jupyter Notebooks & IDE
