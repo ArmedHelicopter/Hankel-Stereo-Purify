@@ -1,12 +1,10 @@
-from typing import Tuple
-
 import numpy as np
 from numpy.typing import NDArray
 
 from ..pipeline import FloatArray, MSSAStage
 
 
-class AHankelStage(MSSAStage[FloatArray, Tuple[FloatArray, FloatArray]]):
+class AHankelStage(MSSAStage[FloatArray, tuple[FloatArray, FloatArray]]):
     """Hankel embedding stage for MSSA.
 
     Input: FloatArray, shape (N, 2)
@@ -16,7 +14,7 @@ class AHankelStage(MSSAStage[FloatArray, Tuple[FloatArray, FloatArray]]):
     def __init__(self, window_length: int) -> None:
         self.window_length = window_length
 
-    def execute(self, data: FloatArray) -> Tuple[FloatArray, FloatArray]:
+    def execute(self, data: FloatArray) -> tuple[FloatArray, FloatArray]:
         """Embed a time series into its Hankel matrix representation."""
         if not data.flags["C_CONTIGUOUS"]:
             data = np.ascontiguousarray(data)

@@ -100,11 +100,13 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-### 4. 安装开发依赖（可选）
+### 4. 安装开发依赖（推荐）
 
 ```bash
 python -m pip install -r requirements-dev.txt
 ```
+
+> `requirements-dev.txt` 包含开发工具和预提交钩子依赖：`pre-commit`、`ruff`、`mypy`、`pytest` 等。
 
 ### 5. 验证安装是否成功
 
@@ -142,6 +144,33 @@ python -m ruff check .
 ```bash
 make check
 ```
+
+---
+
+## 代码规范与预提交检查（Pre-commit Hooks）
+
+本项目使用 `pre-commit` + `Ruff` 组合，目的在于把低级的格式错误拦截在本地，避免 CI 失败。
+
+- 先激活虚拟环境，并确保已经执行过：
+  ```bash
+  python -m pip install -r requirements-dev.txt
+  ```
+- 在首次克隆项目后，执行一次：
+  ```bash
+  python -m pre_commit install
+  ```
+- 之后的正常提交流程就是：
+  ```bash
+  git commit
+  ```
+- 如果钩子拦截了提交，说明 `Ruff` 已自动修复了格式问题（例如删除多余空格或优化 import）。
+  这时请重新执行：
+  ```bash
+  git add .
+  git commit
+  ```
+
+这个流程能把简单错误和风格问题留在本地解决，保持 CI 清洁且更高效。
 
 ---
 

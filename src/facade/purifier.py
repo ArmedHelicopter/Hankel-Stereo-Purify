@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from src.core.exceptions import AudioIOError, ConfigurationError, HankelPurifyError
 from src.utils.logger import get_logger
@@ -42,7 +42,9 @@ class AudioPurifier:
             try:
                 output_file.parent.mkdir(parents=True, exist_ok=True)
             except OSError as exc:
-                raise AudioIOError(f"Unable to create output directory: {output_file.parent}") from exc
+                raise AudioIOError(
+                    f"Unable to create output directory: {output_file.parent}"
+                ) from exc
 
     def _validate_configuration(self) -> None:
         if self.window_length <= 0:
@@ -56,13 +58,13 @@ class AudioPurifier:
         self.logger.info("开始处理流式数据...")
         # Main entrypoint for stream processing; core operators assume validated inputs.
         # total_blocks = compute_total_blocks_from_stream(input_path, block_size)
-        # with tqdm(total=total_blocks, desc="Purifying audio", unit="block") as progress:
+        # with tqdm(total=total_blocks, desc="Purifying audio",
+        #           unit="block") as progress:
         #     for block_data in stream_blocks(input_path, block_size):
-        #         purified_block = process_block(block_data)
-        #         write_block(purified_block, output_path)
-        #         progress.update(1)
         self.logger.info("流式数据处理完成")
-        raise NotImplementedError("AudioPurifier.process_file must be implemented by a concrete purifier.")
+        raise NotImplementedError(
+            "AudioPurifier.process_file must be implemented by a concrete purifier."
+        )
 
 
 class MSSAPurifierBuilder:

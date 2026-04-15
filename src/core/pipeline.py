@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Generic, List, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -22,7 +22,7 @@ class MSSAStage(ABC, Generic[T_in, T_out]):
 class Pipeline:
     """Pipeline coordinator that sequences MSSA stages."""
 
-    def __init__(self, stages: Optional[List[MSSAStage[Any, Any]]] = None) -> None:
+    def __init__(self, stages: list[MSSAStage[Any, Any]] | None = None) -> None:
         self.stages = stages or []
 
     def add_stage(self, stage: MSSAStage[Any, Any]) -> None:

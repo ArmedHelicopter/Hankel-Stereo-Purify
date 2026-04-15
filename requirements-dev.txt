@@ -1,3 +1,7 @@
+-r requirements.txt
 pytest>=8.0.0
 pytest-cov>=4.0.0
 types-tqdm>=4.65.0
+ruff>=0.0.291
+mypy>=1.9.0
+pre-commit>=3.4.0

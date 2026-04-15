@@ -1,6 +1,5 @@
 import logging
 from pathlib import Path
-from typing import Optional
 
 import colorlog
 from tqdm import tqdm
@@ -25,7 +24,7 @@ def _ensure_log_dir(log_path: Path) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def get_logger(name: str, log_file: Optional[str] = None) -> logging.Logger:
+def get_logger(name: str, log_file: str | None = None) -> logging.Logger:
     logger = logging.getLogger(name)
     if logger.handlers:
         return logger

@@ -3,7 +3,5 @@ scipy>=1.10.0
 librosa>=0.10.0
 matplotlib>=3.7.0
 soundfile>=0.12.1
-ruff>=0.0.291
-mypy>=1.9.0
 tqdm>=4.65.0
 colorlog>=6.7.0
