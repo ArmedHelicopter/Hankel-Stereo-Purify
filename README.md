@@ -24,33 +24,51 @@
 
 ---
 
-## 目录结构说明
+## 项目结构图
 
-```
-Hankel-Stereo-Purify/
-├── README.md               # 项目说明和开发指南
-├── requirements.txt        # 运行时依赖
-├── requirements-dev.txt    # 开发、测试和类型检查依赖
-├── pyproject.toml          # Ruff / Mypy /工具配置
-├── src/
-│   ├── cli.py              # 命令行入口
-│   ├── core/
-│   │   ├── pipeline.py     # MSSAStage 抽象类型和流水线调度
-│   │   ├── stages/
-│   │   │   ├── a_hankel.py    # Hankel 嵌入算子
-│   │   │   ├── b_multichannel.py # 多通道块矩阵组合
-│   │   │   ├── c_svd.py        # SVD 分解与截断
-│   │   │   └── d_diagonal.py   # 对角平均化重构
-│   ├── facade/
-│   │   └── purifier.py     # 外观层边界校验与处理入口
-│   └── utils/
-│       └── logger.py       # 日志处理与 tqdm 输出
-├── tests/
-│   └── test_a_hankel.py    # 零拷贝和 Hankel 嵌入单元测试
-├── data/
-│   ├── raws/               # 放置下载的标准测试音频文件
-│   └── processed/          # 存放处理后输出文件
-└── docs/                   # 需求文档与理论参考
+```text
+Hankel-Stereo-Purify/                  项目根目录
+├── .github/                           GitHub Actions 配置，自动运行 CI 检查
+│   └── workflows/                     CI 工作流文件夹
+├── .pre-commit-config.yaml            pre-commit 钩子配置，提交前检查代码
+├── .gitignore                         忽略不需要提交的临时文件和缓存
+├── README.md                          项目说明文档
+├── requirements.txt                   运行时依赖包列表
+├── requirements-dev.txt               开发依赖包列表
+├── pyproject.toml                     Ruff 和 Mypy 等工具配置文件
+├── src/                               源代码目录
+│   ├── app.py                         程序入口应用定义
+│   ├── cli.py                         命令行入口
+│   ├── core/                          核心计算逻辑目录
+│   │   ├── __init__.py                 core 包初始化文件
+│   │   ├── exceptions.py               自定义异常类型定义
+│   │   ├── pipeline.py                 流水线调度和阶段接口定义
+│   │   ├── stages/                     分阶段处理代码
+│   │   │   ├── __init__.py
+│   │   │   ├── a_hankel.py             Hankel 嵌入阶段
+│   │   │   ├── b_multichannel.py       多通道矩阵组合阶段
+│   │   │   ├── c_svd.py                SVD 分解阶段
+│   │   │   └── d_diagonal.py           对角平均化重构阶段
+│   │   └── strategies/                 阶段策略实现目录
+│   │       ├── __init__.py
+│   │       ├── truncation.py          截断策略实现
+│   │       └── windowing.py           窗口策略实现
+│   ├── facade/                        对外调用接口目录
+│   │   ├── __init__.py
+│   │   └── purifier.py                外部调用入口和参数校验
+│   ├── io/                            输入输出相关代码
+│   │   ├── __init__.py
+│   │   └── audio_stream.py            音频读写处理
+│   └── utils/                         工具辅助代码
+│       ├── __init__.py
+│       └── logger.py                  日志处理
+├── tests/                             测试代码目录
+│   ├── __init__.py
+│   └── test_a_hankel.py               Hankel 阶段单元测试
+├── data/                              数据存放目录
+│   ├── processed/                     处理结果文件夹
+│   └── raw/                           原始音频文件夹
+└── docs/                              项目文档目录
 ```
 
 ---
