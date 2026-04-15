@@ -25,7 +25,7 @@
 - 构造 Hankel 矩阵 $H \in \mathbb{R}^{L \times K}$，满足 $h_{i,j} = x_{i+j-1}$
 - 必须满足反角线元素相等的 Hankel 结构特性
 
-**实现模块：** [src/hankel_matrix.py](src/hankel_matrix.py)
+**实现模块：** [src/core/stages/a_hankel.py](src/core/stages/a_hankel.py)
 
 ### 模块 B：MSSA 块矩阵组合 (Multichannel Block Construction)
 
@@ -36,7 +36,7 @@
   $$\mathbf{X}_{total} = [H_L, H_R] \in \mathbb{R}^{L \times 2K}$$
 - 联合降噪避免单通道处理所致的声像漂移
 
-**实现模块：** [src/mssa_core.py](src/mssa_core.py)
+**实现模块：** [src/core/stages/b_multichannel.py](src/core/stages/b_multichannel.py)
 
 ### 模块 C：SVD 正交分解与截断 (Subspace Truncation)
 
@@ -62,36 +62,45 @@
 
 ## 仓库结构
 
+该项目当前已按 `docs/software_design.md` 的标准化目录映射创建占位模块，后续可以在这些子目录中完成各模块实现：
+
 ```
 Hankel-Stereo-Purify/
 ├── README.md                          # 项目说明文档
 ├── requirements.txt                   # Python 依赖清单
 ├── src/                               # 核心算法实现
 │   ├── __init__.py                    # 包初始化
-│   ├── audio_utils.py                 # 音频 I/O 与预处理模块
-│   │                                  #   - FLAC 文件流式读取
-│   │                                  #   - 多通道 PCM 数据解析
-│   │                                  #   - Overlap-Add 分帧处理
-│   │                                  #   - Hanning 窗加窗
-│   ├── hankel_matrix.py               # 模块A：Hankel 矩阵化
-│   │                                  #   - 1D→2D 映射
-│   │                                  #   - 零拷贝实现（stride tricks）
-│   └── mssa_core.py                   # 模块B/C/D：MSSA 核心引擎
-│                                       #   - 块矩阵组合
-│                                       #   - SVD 分解与截断
-│                                       #   - 对角平均化重构
+│   ├── app.py                         # 可选的 EDA / 控制平面入口
+│   ├── cli.py                         # 命令行入口
+│   ├── core/                          # 核心计算逻辑
+│   │   ├── __init__.py
+│   │   ├── pipeline.py                # 流水线调度器与 MSSAStage 抽象类
+│   │   ├── stages/                    # 流水线节点占位文件
+│   │   │   ├── a_hankel.py
+│   │   │   ├── b_multichannel.py
+│   │   │   ├── c_svd.py
+│   │   │   └── d_diagonal.py
+│   │   └── strategies/                # 策略模式占位文件
+│   │       ├── __init__.py
+│   │       ├── truncation.py
+│   │       └── windowing.py
+│   ├── facade/                        # 外观层占位文件
+│   │   ├── __init__.py
+│   │   └── purifier.py
+│   └── io/                            # I/O 边界层占位文件
+│       ├── __init__.py
+│       └── audio_stream.py
 ├── docs/                              # 文档与参考资料
 │   ├── prd.md                         # 产品需求规格说明书 (PRD)
-│   │                                  #   - 详细数学定义
-│   │                                  #   - 功能与非功能需求
-│   │                                  #   - 验收标准
 │   └── MSSA 声学信号去噪.pdf          # 相关学术文献
 ├── notebooks/                         # Jupyter 实验笔记本
-│                                       #   (预留、尚未使用)
 └── data/                              # 数据目录
     ├── raw/                           # 原始音频文件(输入)
     └── processed/                     # 处理后的降噪音频(输出)
 ```
+
+> 说明：以上 `src/` 子目录及文件为占位实现，后续可根据设计规范补充具体业务逻辑。
+> 旧顶层文件路径（如 `src/audio_utils.py`、`src/hankel_matrix.py`、`src/mssa_core.py`）已被移除，项目现已统一为新 `src/` 结构路线。
 
 ---
 
@@ -172,26 +181,10 @@ data/raw/
 ### 基本使用示例
 
 ```python
-from src.audio_utils import AudioProcessor
-from src.hankel_matrix import HankelMatrix
-from src.mssa_core import MSSADenoiser
+from src.facade.purifier import AudioPurifier
 
-# 1. 加载音频
-processor = AudioProcessor()
-audio_left, audio_right, sr = processor.load_flac('data/raw/input.flac')
-
-# 2. 创建 Hankel 矩阵
-hankel = HankelMatrix(window_length=2048)
-H_left = hankel.create(audio_left)
-H_right = hankel.create(audio_right)
-
-# 3. 执行 MSSA 降噪
-denoiser = MSSADenoiser(truncation_rank=100)
-audio_left_denoised, audio_right_denoised = denoiser.denoise(H_left, H_right)
-
-# 4. 保存结果
-processor.save_flac(audio_left_denoised, audio_right_denoised, 
-                     'data/processed/output.flac', sr)
+purifier = AudioPurifier()
+purifier.process_file('data/raw/input.flac', 'data/processed/output.flac')
 ```
 
 ---
@@ -233,17 +226,17 @@ processor.save_flac(audio_left_denoised, audio_right_denoised,
 ```
 输入 FLAC
    ↓
-[audio_utils] 流式读取与分帧预处理
+[src/io/audio_stream.py] 流式读取与分帧预处理
    ↓
-[hankel_matrix] 模块A - Hankel 矩阵化 (1D→2D)
+[src/core/stages/a_hankel.py] 模块A - Hankel 矩阵化 (1D→2D)
    ↓
-[mssa_core] 模块B - 多通道块矩阵组合
+[src/core/stages/b_multichannel.py] 模块B - 多通道块矩阵组合
    ↓
-[mssa_core] 模块C - SVD 分解与截断
+[src/core/stages/c_svd.py] 模块C - SVD 分解与截断
    ↓
-[mssa_core] 模块D - 对角平均化重构 (2D→1D)
+[src/core/stages/d_diagonal.py] 模块D - 对角平均化重构 (2D→1D)
    ↓
-[audio_utils] 输出降噪 FLAC
+[src/facade/purifier.py] 外观层调用
 ```
 
 ---
