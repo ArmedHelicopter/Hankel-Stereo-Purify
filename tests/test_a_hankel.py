@@ -1,7 +1,15 @@
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 
 from src.core.stages.a_hankel import AHankelStage
+
+
+def test_hankel_rejects_short_input() -> None:
+    x = np.zeros((2, 2), dtype=np.float64)
+    stage = AHankelStage(window_length=4)
+    with pytest.raises(ValueError, match="at least window_length"):
+        stage.execute(x)
 
 
 def test_hankel_embedding_math_and_memory() -> None:

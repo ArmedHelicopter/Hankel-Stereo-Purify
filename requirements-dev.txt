@@ -1,3 +1,4 @@
+# Development & CI (install after requirements.txt). Mirrors .github/workflows/ci.yml.
 -r requirements.txt
 pytest>=8.0.0
 pytest-cov>=4.0.0

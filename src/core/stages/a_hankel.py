@@ -20,6 +20,11 @@ class AHankelStage(MSSAStage[FloatArray, tuple[FloatArray, FloatArray]]):
             data = np.ascontiguousarray(data)
 
         n = data.shape[0]
+        if n < self.window_length:
+            raise ValueError(
+                "Hankel embedding requires at least "
+                f"window_length={self.window_length} samples per channel (got {n})."
+            )
         k = n - self.window_length + 1
 
         def hankel_view(channel: NDArray[np.float64]) -> FloatArray:

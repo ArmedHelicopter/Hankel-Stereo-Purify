@@ -1,21 +1,6 @@
 import numpy as np
-from numpy.typing import NDArray
 
 from ..pipeline import FloatArray, MSSAStage
-
-
-def _diagonal_average_channel(h: FloatArray) -> NDArray[np.float64]:
-    """Map an L x K matrix to a length-(L+K-1) series by anti-diagonal averaging."""
-    l_row, k_dim = int(h.shape[0]), int(h.shape[1])
-    n_out = l_row + k_dim - 1
-    sums = np.zeros(n_out, dtype=np.float64)
-    counts = np.zeros(n_out, dtype=np.float64)
-    for i in range(l_row):
-        for j in range(k_dim):
-            idx = i + j
-            sums[idx] += h[i, j]
-            counts[idx] += 1.0
-    return sums / counts
 
 
 class DDiagonalStage(MSSAStage[FloatArray, FloatArray]):
@@ -25,6 +10,31 @@ class DDiagonalStage(MSSAStage[FloatArray, FloatArray]):
     Output: FloatArray, shape (N, 2)
     """
 
+    @staticmethod
+    def fast_diagonal_average(matrix: FloatArray) -> FloatArray:
+        """Anti-diagonal average: map L x K Hankel block to length-(L+K-1) series."""
+        a = np.asarray(matrix, dtype=np.float64, order="C")
+        if a.ndim != 2:
+            raise ValueError("fast_diagonal_average expects a 2D matrix.")
+        m, n = int(a.shape[0]), int(a.shape[1])
+        if m == 0 or n == 0:
+            return np.zeros(0, dtype=np.float64)
+        # Anti-diagonal index t = i + j for each (i,j). Avoid full np.indices((m,n))
+        # (two large int64 grids); accumulate per t in O(m*n) time with lower peak RSS.
+        minlength = m + n - 1
+        sums = np.zeros(minlength, dtype=np.float64)
+        counts = np.zeros(minlength, dtype=np.float64)
+        for t in range(minlength):
+            i0 = max(0, t - (n - 1))
+            i1 = min(t, m - 1)
+            if i0 > i1:
+                continue
+            i = np.arange(i0, i1 + 1, dtype=np.intp)
+            j = t - i
+            sums[t] = np.sum(a[i, j])
+            counts[t] = float(i1 - i0 + 1)
+        return sums / counts
+
     def execute(self, data: FloatArray) -> FloatArray:
         """Reconstruct the denoised time series from the truncated matrix."""
         _, cols = data.shape
@@ -33,6 +43,6 @@ class DDiagonalStage(MSSAStage[FloatArray, FloatArray]):
         k_dim = cols // 2
         h_l = data[:, :k_dim]
         h_r = data[:, k_dim:]
-        left = _diagonal_average_channel(h_l)
-        right = _diagonal_average_channel(h_r)
+        left = self.fast_diagonal_average(h_l)
+        right = self.fast_diagonal_average(h_r)
         return np.column_stack((left, right))

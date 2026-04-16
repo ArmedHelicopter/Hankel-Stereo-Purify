@@ -77,5 +77,37 @@ wheels/
 *.log
 .pytest_cache/
 
+# Coverage (pytest-cov)
+.coverage
+.coverage.*
+htmlcov/
+
 # OS Files
 Thumbs.db
+
+# ==========================================
+# AI Agents, Prompts & Cursor Configurations
+# ==========================================
+
+# 1. Cursor 编辑器本地配置与规则
+.cursor/
+.cursorrules
+
+# 2. AI 提示词与系统设定文件 (匹配目录和常见后缀)
+prompts/
+prompt.md
+*.prompt.md
+*_prompt.txt
+system_instructions.txt
+
+# 3. Plan Agent 生成的计划与草稿文档
+plan.md
+plan_*.md
+architecture_plan.md
+TODO.md
+draft_*.md
+
+# 4. 如果你用到了类似 Cline/Devin 的外部 Agent 产生的工作流日志
+.cline/
+agent_logs/
+*.agent.log

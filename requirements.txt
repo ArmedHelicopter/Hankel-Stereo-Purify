@@ -1,3 +1,5 @@
+# Runtime dependencies (CLI + library). Python >= 3.10 (see CI / pyproject mypy).
+# System: libsndfile required by the soundfile wheel at runtime.
 numpy>=1.24.0
 scipy>=1.10.0
 soundfile>=0.12.1

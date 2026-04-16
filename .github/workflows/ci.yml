@@ -3,9 +3,9 @@ name: Hankel-Stereo-Purify CI
 # 触发条件：推送到主分支或发起 Pull Request 时触发
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "cursor" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "cursor" ]
 
 jobs:
   build-and-test:
@@ -18,10 +18,10 @@ jobs:
 
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
         # 开启 pip 缓存，加快流水线执行速度
@@ -51,4 +51,4 @@ jobs:
         PYTHONPATH: src
       run: |
         # 运行测试驱动框架，重点验证零拷贝 (np.shares_memory) 和数学准确性
-        pytest tests/ --cov=src --cov-report=term-missing
+        pytest tests/

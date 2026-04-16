@@ -1,0 +1,18 @@
+# Optional PRD F-05 Streamlit UI: frontend/app.py
+#
+# Must match the rest of this repository:
+#   - Python >= 3.10 (same as README / .github/workflows/ci.yml / pyproject mypy)
+#   - System: libsndfile — required by soundfile (cannot be installed via pip)
+#
+# One install pulls the full MSSA stack (-r requirements.txt) plus UI extras below.
+# EDA imports src.facade.purifier; "full job" runs `python -m src.cli` with PYTHONPATH=repo root.
+#
+#   python -m pip install -r requirements-frontend.txt
+#
+# Version notes:
+#   - streamlit>=1.32: reliable support matrix with Python 3.10–3.13
+#   - matplotlib>=3.8: compatible with numpy 2.x when pip resolves latest numpy from requirements.txt
+#
+-r requirements.txt
+matplotlib>=3.8.0
+streamlit>=1.32.0

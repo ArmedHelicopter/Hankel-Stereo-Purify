@@ -1,13 +1,31 @@
+"""Facade: OLA + MSSA over stereo PCM via libsndfile.
+
+``process_file`` maps exceptions to stable ``HankelPurifyError`` subclasses. For
+``RuntimeError``, classification uses ``type(exc).__module__`` with prefix
+``numpy`` or ``scipy`` (including submodules e.g. ``numpy.linalg``) as the
+numerical stack; other ``RuntimeError`` types are **not** treated as LAPACK/SVD
+failures and get a distinct ``ProcessingError`` message so they are not confused
+with ``ValueError``/constraint paths. Third-party code that wraps NumPy/SciPy may
+use different exception classes; those still surface via the generic
+``Exception`` → ``ProcessingError`` path when not ``RuntimeError``.
+"""
+
 import os
-import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import soundfile as sf
-from numpy.typing import NDArray
 
-from src.core.exceptions import AudioIOError, ConfigurationError, HankelPurifyError
+from src.core.exceptions import (
+    AudioIOError,
+    ConfigurationError,
+    HankelPurifyError,
+    ProcessingError,
+    validate_w_corr_threshold,
+)
+from src.core.linalg_errors import MSSA_LINALG_ERRORS
 from src.core.pipeline import Pipeline
 from src.core.stages.a_hankel import AHankelStage
 from src.core.stages.b_multichannel import BMultichannelStage
@@ -18,13 +36,45 @@ from src.core.strategies.truncation import (
     FixedRankStrategy,
     TruncationStrategy,
 )
-from src.facade.ola import list_frame_starts, sqrt_hanning_weights
-from src.io.audio_stream import read_flac_metadata
+from src.facade.ola import sqrt_hanning_weights
+from src.facade.pcm_producer import producer_fill_queue
+from src.facade.soundfile_ola import SoundfileOlaMixin
+from src.io.audio_formats import validate_io_paths
+from src.io.io_messages import (
+    audio_io_failed_pair,
+    input_file_does_not_exist,
+    input_path_not_a_file,
+    unable_to_create_output_directory,
+)
 from src.utils.logger import get_logger
 
 
-class AudioPurifier:
-    """Stereo FLAC I/O: OLA (F-02), MSSA per frame, optional memmap (NF-01).
+def _resolve_max_input_samples(explicit: int | None) -> int | None:
+    """CLI/builder explicit limit wins over ``HSP_MAX_SAMPLES``."""
+    if explicit is not None:
+        if explicit <= 0:
+            raise ConfigurationError("max_input_samples must be a positive integer.")
+        return explicit
+    raw = os.environ.get("HSP_MAX_SAMPLES")
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        n = int(str(raw).strip(), 10)
+    except ValueError as exc:
+        raise ConfigurationError(
+            "HSP_MAX_SAMPLES must be a positive integer if set."
+        ) from exc
+    if n <= 0:
+        raise ConfigurationError("HSP_MAX_SAMPLES must be positive if set.")
+    return n
+
+
+# Backwards-compatible name for tests that monkeypatch the producer entrypoint.
+_producer_fill_queue = producer_fill_queue
+
+
+class AudioPurifier(SoundfileOlaMixin):
+    """Stereo PCM I/O via soundfile/OLA (F-02), MSSA per frame, optional memmap (NF-01).
 
     Validate paths/config here; stages trust inputs for speed.
     """
@@ -38,10 +88,13 @@ class AudioPurifier:
         frame_size: int | None = None,
         hop_size: int | None = None,
         max_working_memory_bytes: int = 1_500_000_000,
+        max_input_samples: int | None = None,
+        w_corr_threshold: float | None = None,
     ) -> None:
         self.window_length = window_length
         self.truncation_rank = truncation_rank
         self.energy_fraction = energy_fraction
+        self.w_corr_threshold = w_corr_threshold
         self.frame_size = (
             frame_size
             if frame_size is not None
@@ -51,6 +104,8 @@ class AudioPurifier:
             hop_size if hop_size is not None else max(1, self.frame_size // 2)
         )
         self.max_working_memory_bytes = max_working_memory_bytes
+        self.max_input_samples = _resolve_max_input_samples(max_input_samples)
+        validate_w_corr_threshold(w_corr_threshold)
         self.logger = get_logger(self.__class__.__name__)
 
     def process_file(self, input_path: str, output_path: str) -> None:
@@ -62,28 +117,81 @@ class AudioPurifier:
         except HankelPurifyError as exc:
             self.logger.error("处理失败：%s", exc)
             raise
-        except Exception:
-            self.logger.exception("Unexpected error during audio purification")
+        except MSSA_LINALG_ERRORS as exc:
+            self.logger.error("数值计算失败（线性代数 / SVD）：%s", exc)
+            raise ProcessingError(
+                "MSSA numerical step failed (linear algebra)."
+            ) from exc
+        except ValueError as exc:
+            self.logger.error("处理失败（数值约束或内部错误）：%s", exc)
+            raise ProcessingError(
+                "MSSA step failed (constraint or internal error)."
+            ) from exc
+        except RuntimeError as exc:
+            mod = getattr(type(exc), "__module__", "") or ""
+            if mod.startswith(("numpy", "scipy")):
+                self.logger.error(
+                    "数值计算失败（%s）：%s",
+                    type(exc).__name__,
+                    exc,
+                )
+                raise ProcessingError(
+                    "MSSA numerical step failed (linear algebra)."
+                ) from exc
+            self.logger.error(
+                "处理失败（未归类为 numpy/scipy 数值栈的 RuntimeError）：%s",
+                exc,
+            )
+            raise ProcessingError(
+                "MSSA step failed (runtime error outside numpy/scipy numerical stack)."
+            ) from exc
+        except KeyboardInterrupt:
             raise
+        except Exception as exc:
+            self.logger.exception(
+                "Unexpected error during audio purification (%s)",
+                type(exc).__name__,
+            )
+            raise ProcessingError(
+                "Unexpected error during audio processing (see logs)."
+            ) from exc
 
     def _validate_paths(self, input_path: str, output_path: str) -> None:
         input_file = Path(input_path)
-        if input_file.suffix.lower() != ".flac":
-            raise ConfigurationError("Unsupported audio format: only FLAC is allowed.")
-        if not input_file.exists():
-            raise AudioIOError(f"Input file does not exist: {input_path}")
-        if not input_file.is_file():
-            raise AudioIOError(f"Input path is not a file: {input_path}")
-
         output_file = Path(output_path)
-        if output_file.suffix.lower() != ".flac":
-            raise ConfigurationError("Output file must use .flac extension.")
+        validate_io_paths(input_file, output_file)
+        if not input_file.exists():
+            raise AudioIOError(input_file_does_not_exist(input_path))
+        if not input_file.is_file():
+            raise AudioIOError(input_path_not_a_file(input_path))
+
         if not output_file.parent.exists():
             try:
                 output_file.parent.mkdir(parents=True, exist_ok=True)
             except OSError as exc:
                 raise AudioIOError(
-                    f"Unable to create output directory: {output_file.parent}"
+                    unable_to_create_output_directory(str(output_file.parent))
+                ) from exc
+
+        in_res = input_file.resolve()
+        out_res = output_file.resolve()
+        if in_res == out_res:
+            raise ConfigurationError(
+                "Input and output must differ; in-place overwrite would corrupt audio."
+            )
+        if output_file.exists() and output_file.is_file():
+            try:
+                if os.path.samefile(input_path, output_path):
+                    raise ConfigurationError(
+                        "Input and output refer to the same file (e.g. hard link)."
+                    )
+            except ConfigurationError:
+                raise
+            except OSError as exc:
+                raise ConfigurationError(
+                    "Cannot verify that input and output refer to distinct files "
+                    "(filesystem identity check failed). Use different paths or fix "
+                    "permissions."
                 ) from exc
 
     def _validate_configuration(self) -> None:
@@ -117,100 +225,51 @@ class AudioPurifier:
             strat = EnergyThresholdStrategy(self.energy_fraction)
         else:
             strat = FixedRankStrategy(self.truncation_rank)
+        wc = self.w_corr_threshold
+        c_wl = self.window_length if wc is not None else None
         return Pipeline(
             [
                 AHankelStage(self.window_length),
                 BMultichannelStage(),
-                CSVDStage(strat),
+                CSVDStage(strat, w_corr_threshold=wc, window_length=c_wl),
                 DDiagonalStage(),
             ],
         )
 
     def _run_processing(self, input_path: str, output_path: str) -> None:
         self.logger.info("开始处理流式数据...")
-        meta = read_flac_metadata(input_path)
-        if meta["channels"] != 2:
-            raise AudioIOError("Only stereo FLAC (2 channels) is supported.")
-        num_samples = meta["frames"]
-        samplerate = meta["samplerate"]
         f_size = self.frame_size
         hop = self.hop_size
         w_sqrt = sqrt_hanning_weights(f_size)[:, np.newaxis]
         w_sq = (w_sqrt * w_sqrt).ravel()
 
         pipeline = self._build_pipeline()
-        starts = list_frame_starts(num_samples, f_size, hop)
-        if not starts:
-            raise AudioIOError("Empty or invalid audio length.")
 
-        # Heuristic RAM for full-length float64 OLA buffers (stereo × samples × 8 bytes
-        # plus margin); exceeds budget → memmap spill under prefix `hsp_ola_`.
-        bytes_needed = num_samples * 24
-        use_memmap = bytes_needed > self.max_working_memory_bytes
-
-        tmp_dir: str | None = None
-        mmap_out: str = ""
-        mmap_w: str = ""
-
-        out_acc: NDArray[np.float64]
-        wsum_1d: NDArray[np.float64]
-        if use_memmap:
-            tmp_dir = tempfile.mkdtemp(prefix="hsp_ola_")
-            mmap_out = os.path.join(tmp_dir, "acc.dat")
-            mmap_w = os.path.join(tmp_dir, "wsum.dat")
-            out_acc = np.memmap(
-                mmap_out, dtype=np.float64, mode="w+", shape=(num_samples, 2)
-            )
-            wsum_1d = np.memmap(
-                mmap_w, dtype=np.float64, mode="w+", shape=(num_samples,)
-            )
-        else:
-            out_acc = np.zeros((num_samples, 2), dtype=np.float64)
-            wsum_1d = np.zeros(num_samples, dtype=np.float64)
+        profile = os.environ.get("HSP_PROFILE_OLA", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        wall0 = time.perf_counter() if profile else 0.0
 
         try:
-            with sf.SoundFile(input_path) as snd:
-                for start in starts:
-                    frame = np.zeros((f_size, 2), dtype=np.float64)
-                    snd.seek(start)
-                    need = min(f_size, num_samples - start)
-                    chunk = snd.read(need, dtype="float64", always_2d=True)
-                    frame[: chunk.shape[0]] = chunk
-                    x_win = frame * w_sqrt
-                    denoised: NDArray[np.float64] = pipeline.execute(x_win)
-                    weighted = denoised * w_sqrt
-                    end = min(start + f_size, num_samples)
-                    sl = end - start
-                    out_acc[start:end] += weighted[:sl]
-                    wsum_1d[start:end] += w_sq[:sl]
-
-            denom = np.maximum(wsum_1d, 1e-12)
-            output = out_acc / denom[:, np.newaxis]
-
-            if use_memmap:
-                output = np.asarray(output, dtype=np.float64)
-
-            np.clip(output, -1.0, 1.0, out=output)
-            sf.write(
+            self._run_processing_soundfile(
+                input_path,
                 output_path,
-                output,
-                samplerate,
-                format="FLAC",
-                subtype="PCM_24",
+                pipeline,
+                f_size,
+                hop,
+                w_sqrt,
+                w_sq,
             )
-        finally:
-            if use_memmap:
-                del out_acc
-                del wsum_1d
-                if tmp_dir is not None:
-                    try:
-                        if mmap_out:
-                            os.unlink(mmap_out)
-                        if mmap_w:
-                            os.unlink(mmap_w)
-                        os.rmdir(tmp_dir)
-                    except OSError:
-                        pass
+        except (OSError, sf.LibsndfileError) as exc:
+            raise AudioIOError(audio_io_failed_pair(input_path, output_path)) from exc
+
+        if profile:
+            self.logger.info(
+                "HSP_PROFILE_OLA wall time: %.3fs",
+                time.perf_counter() - wall0,
+            )
 
         self.logger.info("流式数据处理完成")
 
@@ -246,6 +305,17 @@ class MSSAPurifierBuilder:
         self.params["max_working_memory_bytes"] = value
         return self
 
+    def set_max_input_samples(self, value: int | None) -> "MSSAPurifierBuilder":
+        """Reject inputs longer than this many samples per channel (optional)."""
+        self.params["max_input_samples"] = value
+        return self
+
+    def set_w_corr_threshold(self, value: float | None) -> "MSSAPurifierBuilder":
+        """Optional W-correlation filter in ``CSVDStage`` (uses window_length as L)."""
+        validate_w_corr_threshold(value)
+        self.params["w_corr_threshold"] = value
+        return self
+
     def build(self) -> AudioPurifier:
         if "window_length" not in self.params:
             raise ConfigurationError(
@@ -266,6 +336,8 @@ class MSSAPurifierBuilder:
         mem = self.params.get("max_working_memory_bytes", 1_500_000_000)
         fs = self.params.get("frame_size")
         hs = self.params.get("hop_size")
+        mis = self.params.get("max_input_samples")
+        wct = self.params.get("w_corr_threshold")
 
         if energy_fraction is not None:
             return AudioPurifier(
@@ -275,6 +347,8 @@ class MSSAPurifierBuilder:
                 frame_size=fs,
                 hop_size=hs,
                 max_working_memory_bytes=mem,
+                max_input_samples=mis,
+                w_corr_threshold=wct,
             )
 
         if truncation_rank is None:
@@ -289,17 +363,6 @@ class MSSAPurifierBuilder:
             frame_size=fs,
             hop_size=hs,
             max_working_memory_bytes=mem,
+            max_input_samples=mis,
+            w_corr_threshold=wct,
         )
-
-
-# Progress bar pseudocode for large-scale stream processing:
-#
-# total_blocks = compute_total_blocks_from_stream(input_path, block_size)
-# logger.info("开始处理流式数据...")
-# with tqdm(total=total_blocks, desc="Purifying audio", unit="block") as progress:
-#     for block_index, block_data in enumerate(stream_blocks(input_path, block_size)):
-#         purified_block = process_block(block_data)
-#         write_block(purified_block, output_path)
-#         progress.update(1)
-#
-# logger.info("流式数据处理完成：%s 块已处理", total_blocks)

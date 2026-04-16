@@ -1,5 +1,7 @@
 # 架构设计与底层瓶颈分析 (Architecture Design & Bottleneck Analysis)
 
+**与当前仓库的关系（请先读）**：下文 **§1–§3** 为计算机体系结构、存储层次与异构计算的**教学与方案对比**，用于解释「为何可能采用生产者-消费者、为何 SVD 常绑 CPU」等背景；**本仓库 MVP** 中解码由**生产者线程**经**有界队列**向主线程供 PCM 块，主线程顺序执行 OLA + MSSA（数值计算未并行化）。§1 中的异步预取对比仍属规划/教学叙述。真实威胁模型、环境变量与性能主因见 **§4** 与 [`README.md`](../README.md)「性能与复杂度」小节。
+
 ## 1. 生产者-消费者模型 (Producer-Consumer Model) 原理
 生产者-消费者模型是并发编程中用于解决数据生成速率与数据处理速率不匹配的标准架构模式。其核心思想是通过引入共享的、线程安全的缓冲区，将数据的获取（I/O 绑定）与数据的计算（CPU 绑定）在空间与时间上解耦。
 
@@ -53,3 +55,34 @@ SVD 求解（如 QR 迭代或分治法）属于强迭代数值算法，包含大
 
 ### 3.3 黄金基准模型验证定位 (Golden Model Verification)
 本纯软件实现阶段的核心定位是建立无损的黄金基准模型。为确保后续在设计底层专用硬件（如基于 MXFP8 等低精度规范的专用乘加阵列）时具备绝对精确的测试对比基准，必须依赖 CPU 在 IEEE-754 双精度浮点（FP64）标准下串行产出确定的测试向量（Test Vectors），规避 GPU 并发调度引入的浮点舍入不确定性。
+
+## 4. 与本仓库当前实现的对照（安全模型、运行时与瓶颈）
+
+本节与 [`README.md`](../README.md) 保持一致，便于架构读者不翻应用文档也能对齐**真实代码路径**。
+
+### 4.1 威胁模型（简化）
+
+- 进程仅读写**用户显式传入的本地路径**，无网络服务面。
+- 输入/输出扩展名由 [`src/io/audio_formats.py`](../src/io/audio_formats.py) **白名单**约束；不根据用户字符串执行外部解码器命令。
+- **同一路径/硬链接**：[`AudioPurifier._validate_paths`](../src/facade/purifier.py) 使用解析路径比较与 `samefile`；若 `samefile` 因权限/跨设备失败则**保守拒绝**（`ConfigurationError`），避免无法判定是否覆盖同一 inode。校验与后续打开之间存在典型 **TOCTOU**（路径被替换）窗口；本地批处理工具按「用户显式路径」信任模型处理，不防恶意同机竞态。
+- **并发**：解码路径为**生产者线程 + 有界队列 + 毒丸**（[`src/facade/purifier.py`](../src/facade/purifier.py)）；MSSA/OLA 仍在**主线程**上顺序执行，无多线程数值流水线。
+
+### 4.2 环境变量（日志与粗测）
+
+| 变量 | 作用（摘要） |
+|------|----------------|
+| `HSP_LOG_FILE` | 设为 `none`/`0`/`off` 等可关闭默认文件日志；若设为路径，进程将在该路径**创建/追加**日志文件（权限允许时），勿指向敏感目录。 |
+| `HSP_PROFILE_OLA` | 设为 `1`/`true`/`yes` 时记录整段 OLA+MSSA 的 wall time。 |
+| `HSP_LOG_IO_TRACE` | 设为 `1`/`true`/`yes` 时在 [`audio_stream.py`](../src/io/audio_stream.py) 打开路径时多打一条 INFO（默认关）。**不**实现读超时；NFS 等慢路径仍可能阻塞。 |
+| `HSP_MAX_SAMPLES` | 正整数时拒绝超过该**每声道样本数**的输入；非法非空值在构建 [`AudioPurifier`](../src/facade/purifier.py) 时 `ConfigurationError`。命令行 `--max-samples` 优先。 |
+
+### 4.3 性能主因与帧数估计
+
+- **主 CPU 成本**：每 OLA 帧一次 **SVD 数值分解**（[`c_svd.py`](../src/core/stages/c_svd.py)）。**固定秩**：`k < min(m,n)` 时优先 `svds`，否则一次 dense `scipy.linalg.svd` 后截断。**能量阈值**：每帧需完整奇异值谱，故每帧一次 dense `scipy.linalg.svd`。帧数随 `list_frame_starts(N, frame_size, hop)` 增长；单帧矩阵约为 \(L \times 2K\)（\(K=\) `frame_size` \(-L+1\)），渐近阶常记 \(O(\min(L,2K)^3)\) 量级（与 README 一致）。
+- **脚本**：[`scripts/estimate_ola_frames.py`](../scripts/estimate_ola_frames.py) 打印帧起点个数；可加 `--window-length L` 打印 \(\min(L,2K)\) 供粗算。
+
+### 4.4 异常分层（面向调用方）
+
+- **I/O / 格式**：`AudioIOError`（含 libsndfile 映射）。
+- **配置**：`ConfigurationError`。
+- **数值 / 处理**：`ProcessingError`（例如 `numpy.linalg.LinAlgError` 与未预期内部错误在 [`process_file`](../src/facade/purifier.py) 中映射），与上述类型均继承 `HankelPurifyError`。CLI：[`src/cli.py`](../src/cli.py) 对 `ConfigurationError` 使用退出码 **2**，其余 `HankelPurifyError` 使用 **1**（见 README「退出码」）。

@@ -1,0 +1,13 @@
+# Local Streamlit theme: 录音窗口 · 橙白琥珀 + CRT（与 frontend/app.py 一致）
+[theme]
+base = "dark"
+primaryColor = "#ea580c"
+backgroundColor = "#141008"
+secondaryBackgroundColor = "#1c140c"
+textColor = "#fff7ed"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[server]

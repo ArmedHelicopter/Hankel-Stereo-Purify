@@ -1,5 +1,13 @@
+"""MSSA stage chain.
+
+Concrete stages use distinct ``T_in``/``T_out`` (e.g. A→B passes a Hankel pair).
+:class:`Pipeline` assembles the full A→B→C→D list; its :meth:`execute` entry/exit
+are :class:`FloatArray` frames for the OLA loop in
+:class:`~src.facade.purifier.AudioPurifier`.
+"""
+
 from abc import ABC, abstractmethod
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -28,9 +36,9 @@ class Pipeline:
     def add_stage(self, stage: MSSAStage[Any, Any]) -> None:
         self.stages.append(stage)
 
-    def execute(self, data: Any) -> Any:
+    def execute(self, data: FloatArray) -> FloatArray:
         """Forward `data` through each stage (used inside the inner denoise loop)."""
         result: Any = data
         for stage in self.stages:
             result = stage.execute(result)
-        return result
+        return cast(FloatArray, result)

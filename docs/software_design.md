@@ -19,6 +19,7 @@
   * 定义 `TruncationStrategy` 接口（含 `get_k()` 方法）。
   * 派生具体策略类，如 `FixedRankStrategy`（固定秩）和 `EnergyThresholdStrategy`（能量阈值）。
   * 核心 SVD 模块只调用策略接口，不包含具体的阈值判断 `if-else` 逻辑。
+  * **可选 W-correlation（`CSVDStage`）**：`w_corr_threshold` 与 `compute_w_correlation_matrix` 输出的 `W[i,0]` 比较（阈值须在 `[0,1]`，与矩阵元素同域）。能量自适应秩模式下仅在**首帧**完整计算保留分量下标，后续帧与当前秩求交后复用，避免每帧重算整张 `W`（详见 `c_svd.py` 类文档）。
 
 ### 2.3 外观模式 (Facade Pattern)
 * **应用场景：** 向前端控制台（EDA）和命令行工具（CLI）隐藏底层重叠相加（Overlap-Add）与流式读取的复杂状态机。
@@ -31,6 +32,7 @@
 * **规约：**
   * 使用 `MSSAPurifierBuilder` 提供链式调用接口（Fluent Interface）。
   * 确保系统实例化时的参数校验（如帧长必须大于跳步）在 Builder 内部完成，防止产生非法状态的处理器实例。
+  * 环境变量 `HSP_MAX_SAMPLES`（与 CLI `--max-samples` 对应）在 **`build()` 构造 `AudioPurifier` 时**即参与解析；若值为非法非空整数，应在该阶段抛出 `ConfigurationError`，而非推迟到 `process_file`。
 
 ## 3. 标准化工程目录映射 (Directory Structure)
 
@@ -53,4 +55,4 @@ src/
 ├── facade/                 # 顶层外观接口
 │   └── purifier.py         # AudioPurifier 与 Builder 模式实现
 ├── cli.py                  # 数据平面：命令行入口
-└── app.py                  # 控制平面：(可选) 前端 EDA 看板入口
+└── (控制平面 GUI/EDA 入口为二期规划，不在本仓库 `src/` 中)

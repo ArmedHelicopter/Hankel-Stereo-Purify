@@ -1,7 +1,7 @@
 import numpy as np
 
 from src.core.stages.a_hankel import AHankelStage
-from src.core.stages.d_diagonal import DDiagonalStage, _diagonal_average_channel
+from src.core.stages.d_diagonal import DDiagonalStage
 
 
 def test_diagonal_average_recovers_hankel_time_series() -> None:
@@ -9,7 +9,7 @@ def test_diagonal_average_recovers_hankel_time_series() -> None:
     stereo = np.column_stack((x, x))
     window_length = 3
     h_l, _ = AHankelStage(window_length=window_length).execute(stereo)
-    recovered = _diagonal_average_channel(h_l)
+    recovered = DDiagonalStage.fast_diagonal_average(h_l)
     np.testing.assert_allclose(recovered, x)
 
 
