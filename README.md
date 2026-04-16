@@ -11,6 +11,15 @@
 - ✅ 支持超大文件流式处理，优先零拷贝实现
 - ✅ 采用现代 Python 类型契约与静态校验
 
+### MVP 范围与后续规划
+
+| 内容 | 状态 |
+|------|------|
+| 数据平面 CLI、立体声 FLAC、OLA、固定秩或能量阈值截断 | **本仓库 MVP** |
+| `src/app.py`、Streamlit/EDA 前端、异步生产者-消费者流水线 | **未实现**（见 PRD F-05 / NF-04 / NF-05，可作二期） |
+
+运行时依赖见 [`requirements.txt`](requirements.txt)（已移除未使用的 `matplotlib`、`librosa`，减小安装体积）。
+
 ---
 
 ## 目标读者
@@ -55,16 +64,20 @@ Hankel-Stereo-Purify/                  项目根目录
 │   │       └── windowing.py           窗口策略实现
 │   ├── facade/                        对外调用接口目录
 │   │   ├── __init__.py
-│   │   └── purifier.py                外部调用入口和参数校验
+│   │   ├── purifier.py                外部调用入口和参数校验
+│   │   └── ola.py                     重叠相加帧索引与窗函数辅助
 │   ├── io/                            输入输出相关代码
 │   │   ├── __init__.py
 │   │   └── audio_stream.py            音频读写处理
 │   └── utils/                         工具辅助代码
 │       ├── __init__.py
 │       └── logger.py                  日志处理
+├── scripts/                           辅助脚本（如峰值 RSS 测量）
 ├── tests/                             测试代码目录
-│   ├── __init__.py
-│   └── test_a_hankel.py               Hankel 阶段单元测试
+│   ├── test_a_hankel.py               Hankel 阶段单元测试
+│   ├── test_pipeline_mssa.py          流水线集成测试
+│   ├── test_cli_smoke.py              CLI 冒烟测试
+│   └── ...                            其余模块与 I/O 测试
 ├── data/                              数据存放目录
 │   ├── processed/                     处理结果文件夹
 │   └── raw/                           原始音频文件夹
@@ -79,14 +92,71 @@ Hankel-Stereo-Purify/                  项目根目录
 
 🔗 **[标准测试音频文件下载](https://drive.google.com/drive/folders/14k0_B0eWyXBGHwFon9WLjC5BhwiD3KhR?usp=drive_link)**
 
-下载后，请将 FLAC 文件放入项目的 `data/raws/` 目录：
+下载后，请将 FLAC 文件放入项目的 `data/raw/` 目录：
 
 ```bash
-mkdir -p data/raws
-mv ~/Downloads/*.flac data/raws/
+mkdir -p data/raw
+mv ~/Downloads/*.flac data/raw/
 ```
 
 如果您希望保留处理后版本，可在 `data/processed/` 目录下保存输出文件。
+
+---
+
+## 命令行降噪（交付使用）
+
+在项目根目录、已安装依赖的前提下，使用 **立体声 FLAC** 作为输入。示例：
+
+```bash
+PYTHONPATH=src python -m src.cli data/raw/sample.flac data/processed/sample_out.flac \
+  -L 256 -k 64
+```
+
+能量阈值截断（与 `-k` 互斥）示例：
+
+```bash
+PYTHONPATH=src python -m src.cli data/raw/sample.flac data/processed/sample_out.flac \
+  -L 256 --energy-fraction 0.95
+```
+
+常用参数：
+
+| 参数 | 含义 |
+|------|------|
+| `-L` / `--window-length` | Hankel 窗口长度 \(L\)，须与算法阶段 A 一致 |
+| `-k` / `--rank` | 固定 SVD 截断秩；不得超过当前帧下的矩阵秩（facade 会校验）。与 `--energy-fraction` **二选一**；若两者都不写则默认 `k=64` |
+| `--energy-fraction` | 累积奇异值能量阈值 \((0,1]\)，每帧自适应秩（**不能与 `-k` 同用**） |
+| `--frame-size` | 重叠相加（OLA）每帧样本数；默认由 \(L\) 推导，且须 **≥ \(L\)** |
+| `--hop` | 帧移；默认 `frame_size // 2`（在未指定 `--frame-size` 时，帧长仍由默认公式算出后再取半），须 **小于 frame_size** |
+| `--max-memory-mb` | OLA 累加器允许占用的内存预算（Mebibytes）；超出时对大缓冲使用临时内存映射文件 |
+
+查看帮助与版本：
+
+```bash
+PYTHONPATH=src python -m src.cli --help
+PYTHONPATH=src python -m src.cli --version
+```
+
+与 PRD **NF-01**（峰值常驻内存约 2GB 水位）相关的测量，可在 Linux 上使用 GNU `time` 或仓库脚本（需可执行权限：`chmod +x scripts/run_with_peak_rss.sh`）：
+
+```bash
+./scripts/run_with_peak_rss.sh data/raw/sample.flac data/processed/sample_out.flac -- \
+  -L 256 -k 64
+```
+
+在输出末尾查找 `Maximum resident set size`（单位一般为 KB）。大文件可在本地复现；CI 仅跑小样本自动化测试。
+
+### 验收与性能记录（模板）
+
+在交付或回归时，建议记录以下字段（可粘贴到 Issue 或内部文档）：
+
+| 项目 | 记录值 |
+|------|--------|
+| 输入 FLAC 大小 / 解码时长 | |
+| 命令行参数（`-L`、`-k`、`--frame-size`、`--hop`、`--max-memory-mb`） | |
+| Wall time（秒） | |
+| Max RSS（`time -v`） | |
+| 备注（机器内存、磁盘类型） | |
 
 ---
 
@@ -142,7 +212,7 @@ python -m pip show pytest
 ### 本地运行测试
 
 ```bash
-PYTHONPATH=src python -m pytest tests/test_a_hankel.py
+PYTHONPATH=src python -m pytest tests/
 ```
 
 ### 运行类型检查
@@ -159,9 +229,13 @@ python -m ruff check .
 
 ### 运行完整检查流程
 
+与 CI 一致：Ruff 检查、`mypy`（含 `tests/`）、全量 `pytest`：
+
 ```bash
 make check
 ```
+
+（`make format` 仅做 `ruff format`，不包含在 `check` 中，以免改动工作区未保存内容。）
 
 ---
 

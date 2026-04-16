@@ -1,3 +1,5 @@
+import numpy as np
+
 from ..pipeline import FloatArray, MSSAStage
 
 
@@ -10,4 +12,7 @@ class BMultichannelStage(MSSAStage[tuple[FloatArray, FloatArray], FloatArray]):
 
     def execute(self, data: tuple[FloatArray, FloatArray]) -> FloatArray:
         """Combine multiple channel Hankel matrices into a joint block matrix."""
-        raise NotImplementedError
+        h_l, h_r = data
+        if h_l.shape != h_r.shape:
+            raise ValueError("Left and right Hankel matrices must have the same shape.")
+        return np.ascontiguousarray(np.hstack((h_l, h_r)))

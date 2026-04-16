@@ -23,6 +23,7 @@ class AHankelStage(MSSAStage[FloatArray, tuple[FloatArray, FloatArray]]):
         k = n - self.window_length + 1
 
         def hankel_view(channel: NDArray[np.float64]) -> FloatArray:
+            # PRD NF-02: view-based Hankel; no Python loops over trajectory indices.
             return np.lib.stride_tricks.as_strided(
                 channel,
                 shape=(self.window_length, k),

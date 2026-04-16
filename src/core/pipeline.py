@@ -11,16 +11,16 @@ FloatArray = NDArray[np.float64]
 
 
 class MSSAStage(ABC, Generic[T_in, T_out]):
-    """Abstract base class for a single MSSA pipeline stage."""
+    """One A→B→C→D step; `execute` runs once per overlap-add frame."""
 
     @abstractmethod
     def execute(self, data: T_in) -> T_out:
-        """Execute the stage and return transformed data."""
+        """Transform `data`; input/output shapes are defined on each concrete stage."""
         raise NotImplementedError
 
 
 class Pipeline:
-    """Pipeline coordinator that sequences MSSA stages."""
+    """Ordered stages; `AudioPurifier` feeds one frame per `execute` call."""
 
     def __init__(self, stages: list[MSSAStage[Any, Any]] | None = None) -> None:
         self.stages = stages or []
@@ -29,6 +29,7 @@ class Pipeline:
         self.stages.append(stage)
 
     def execute(self, data: Any) -> Any:
+        """Forward `data` through each stage (used inside the inner denoise loop)."""
         result: Any = data
         for stage in self.stages:
             result = stage.execute(result)
