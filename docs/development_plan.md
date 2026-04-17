@@ -13,7 +13,7 @@
 - `src/io`：音频 I/O 与流式预处理
 - `src/core`：MSSA 算法流水线与数学模块
 - `src/facade`：顶层接口与 CLI 集成
-- 旧顶层路径（如 `src/audio_utils.py`、`src/hankel_matrix.py`、`src/mssa_core.py`）已不再采用，项目已统一新 `src/` 结构路线
+- 项目已统一为当前 [`src/`](../src/) 分层（`core/`、`facade/`、`io/` 等）；历史平铺模块文件名不再维护
 
 ### 1.2 关键设计原则
 

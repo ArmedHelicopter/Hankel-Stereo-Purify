@@ -22,10 +22,10 @@
   * **可选 W-correlation（`CSVDStage`）**：`w_corr_threshold` 与 `compute_w_correlation_matrix` 输出的 `W[i,0]` 比较（阈值须在 `[0,1]`，与矩阵元素同域）。能量自适应秩模式下仅在**首帧**完整计算保留分量下标，后续帧与当前秩求交后复用，避免每帧重算整张 `W`（详见 `c_svd.py` 类文档）。
 
 ### 2.3 外观模式 (Facade Pattern)
-* **应用场景：** 向前端控制台（EDA）和命令行工具（CLI）隐藏底层重叠相加（Overlap-Add）与流式读取的复杂状态机。
+* **应用场景：** 向命令行（[`src/cli.py`](../src/cli.py)）与可选控制平面（仓库根目录 [`frontend/app.py`](../frontend/app.py)，Streamlit EDA + 全量任务子进程）隐藏重叠相加（Overlap-Add）、PCM 生产者线程与流式读取的状态机。
 * **规约：**
-  * 封装顶层类 `AudioPurifier`。
-  * 对外仅暴露极其简单的 API，例如 `process_file(input_path, output_path)`。UI 层与 CLI 层绝对不允许直接操作 `numpy` 矩阵或实例化底层的 `MSSAStage` 模块。
+  * 封装顶层类 `AudioPurifier`（整文件 OLA 与队列逻辑在 [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py) 的 `SoundfileOlaMixin` 中，由 `AudioPurifier` 混入）。
+  * 对外仅暴露极其简单的 API，例如 `process_file(input_path, output_path)`。CLI 与前端不得直接操作 `numpy` 矩阵或实例化底层的 `MSSAStage` 模块；全量批处理应通过子进程调用 CLI（见 PRD NF-05）。
 
 ### 2.4 建造者模式 (Builder Pattern)
 * **应用场景：** 管理系统初始化时庞杂的超参数（$L, k$, 帧长，跳步）。
@@ -42,17 +42,29 @@
 src/
 ├── core/                   # 核心计算逻辑 (纯粹的数学与张量操作)
 │   ├── pipeline.py         # 流水线调度器与 MSSAStage 抽象类
-│   ├── stages/             # 流水线节点 (团队分工区域)
+│   ├── stages/             # 流水线节点
 │   │   ├── a_hankel.py
 │   │   ├── b_multichannel.py
 │   │   ├── c_svd.py
 │   │   └── d_diagonal.py
-│   └── strategies/         # 策略模式实现
+│   └── strategies/         # 策略与辅助
 │       ├── truncation.py   # 截断策略
-│       └── windowing.py    # 加窗策略
-├── io/                     # 数据流入出边界
-│   └── audio_stream.py     # 封装 soundfile 动态指针块读取
-├── facade/                 # 顶层外观接口
-│   └── purifier.py         # AudioPurifier 与 Builder 模式实现
-├── cli.py                  # 数据平面：命令行入口
-└── (控制平面 GUI/EDA 入口为二期规划，不在本仓库 `src/` 中)
+│       ├── windowing.py    # 加窗策略
+│       └── grouping.py     # W-correlation 矩阵（管线内可选过滤）
+├── io/                     # 数据流边界（libsndfile）
+│   ├── audio_stream.py     # 块读取与元数据
+│   ├── audio_formats.py    # 后缀白名单与写出参数
+│   ├── stereo_soundfile.py # 立体声约束等
+│   ├── sndfile_capabilities.py
+│   └── io_messages.py      # 统一 I/O 错误文案
+├── facade/                 # 顶层外观
+│   ├── purifier.py         # AudioPurifier、MSSAPurifierBuilder、process_file 入口
+│   ├── soundfile_ola.py    # SoundfileOlaMixin：OLA 主循环、memmap、PCM 队列侧消费
+│   ├── pcm_producer.py     # 生产者线程：有界队列 + 毒丸
+│   └── ola.py              # 帧起点、Hanning、OLA 辅助
+├── utils/
+│   └── logger.py
+└── cli.py                  # 数据平面：命令行入口
+```
+
+与 `src/` **并列**于仓库根目录：**可选** Streamlit 控制平面 [`frontend/app.py`](../frontend/app.py)（PRD F-05；依赖 [`requirements-frontend.txt`](../requirements-frontend.txt)）。数据平面主路径仍为 `src/cli.py`。

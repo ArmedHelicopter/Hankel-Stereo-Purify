@@ -65,7 +65,7 @@ SVD 求解（如 QR 迭代或分治法）属于强迭代数值算法，包含大
 - 进程仅读写**用户显式传入的本地路径**，无网络服务面。
 - 输入/输出扩展名由 [`src/io/audio_formats.py`](../src/io/audio_formats.py) **白名单**约束；不根据用户字符串执行外部解码器命令。
 - **同一路径/硬链接**：[`AudioPurifier._validate_paths`](../src/facade/purifier.py) 使用解析路径比较与 `samefile`；若 `samefile` 因权限/跨设备失败则**保守拒绝**（`ConfigurationError`），避免无法判定是否覆盖同一 inode。校验与后续打开之间存在典型 **TOCTOU**（路径被替换）窗口；本地批处理工具按「用户显式路径」信任模型处理，不防恶意同机竞态。
-- **并发**：解码路径为**生产者线程 + 有界队列 + 毒丸**（[`src/facade/purifier.py`](../src/facade/purifier.py)）；MSSA/OLA 仍在**主线程**上顺序执行，无多线程数值流水线。
+- **并发**：解码由 [`src/facade/pcm_producer.py`](../src/facade/pcm_producer.py) **生产者线程**推入有界队列；主线程在 [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py)（`SoundfileOlaMixin`，由 [`AudioPurifier`](../src/facade/purifier.py) 混入）侧消费并执行 OLA+MSSA，**毒丸** `None` 结束消费。数值流水线无多线程并行。
 
 ### 4.2 环境变量（日志与粗测）
 

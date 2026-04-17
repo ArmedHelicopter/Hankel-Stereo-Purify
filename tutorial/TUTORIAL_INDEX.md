@@ -12,7 +12,7 @@
 | 解释联合块 \([H_L,H_R]\) 与「一次联合 SVD」的动机（相位锁定） | 定位 `BMultichannelStage`；描述 `Pipeline` 链上 `tuple`→`ndarray` 的类型变化 | 指出 PRD F-03 与 `_build_pipeline` 中四阶段组装 | 02 |
 | 对比固定秩截断与能量阈值的数学假设；说出何时 full SVD | 在 `CSVDStage.execute` 标出 `FixedRankStrategy` 与能量分支分叉；指认 `(u*s)@vh` | 指认 `TruncationStrategy`、能量+W 首帧冻结语义 | 03 |
 | 解释对角平均输出长度 \(L+K-1\) 与联合输出形状 | 定位 `DDiagonalStage`、`fast_diagonal_average` | 理解 D 与 OLA 除法不在同一模块的原因 | 04 |
-| 复述 OLA 与短时平稳假设 | 跟读 `list_frame_starts`、`AudioPurifier` 内层循环 | 指认 `pcm_producer` 背压、memmap、`Queue` | 05 |
+| 复述 OLA 与短时平稳假设 | 跟读 `list_frame_starts`、`soundfile_ola` 中 OLA 主循环（`AudioPurifier` 经 mixin 混入） | 指认 `pcm_producer` 背压、memmap、`Queue` | 05 |
 | 区分 `ConfigurationError` / `AudioIOError` / `ProcessingError` 适用场景 | 从 `src/cli.py` 追到 `process_file` 的异常映射 | 指认 `validate_io_paths`；说明 `test_purifier_producer_errors` 测了什么契约 | 06 |
 
 ## 三十分钟路径（验收用）
@@ -55,7 +55,7 @@
 | 5 | [05_OLA与流式门面.md](05_OLA与流式门面.md) | 帧、hop、窗；生产者队列与 memmap 决策 |
 | 6 | [06_防御性设计与测试.md](06_防御性设计与测试.md) | 异常类型、白名单 I/O、pytest 如何当契约 |
 
-**代码锚点总览**：核心链 `src/core/pipeline.py` → 阶段 `src/core/stages/{a_hankel,b_multichannel,c_svd,d_diagonal}.py` → 门面 `src/facade/purifier.py`。
+**代码锚点总览**：核心链 `src/core/pipeline.py` → 阶段 `src/core/stages/{a_hankel,b_multichannel,c_svd,d_diagonal}.py` → 门面入口 [`src/facade/purifier.py`](../src/facade/purifier.py)（`process_file`、校验、`_build_pipeline`）+ 整文件 OLA/PCM/memmap [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py)（`SoundfileOlaMixin`）+ 生产者 [`src/facade/pcm_producer.py`](../src/facade/pcm_producer.py)。
 
 ## 可选习题（各一条）
 
