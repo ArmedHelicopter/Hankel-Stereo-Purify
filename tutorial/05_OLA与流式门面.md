@@ -9,7 +9,7 @@
 ## 决策复盘（Why vs Why not）
 
 **为什么 memmap 累加器？**  
-当样本数 × 每样本字节超过 `--max-memory-mb` 预算，累加缓冲落到临时文件映射，换 **I/O 带宽** 换 **RAM**——见 [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py) 中 `_allocate_ola_accumulators`（由 `AudioPurifier` 继承 `SoundfileOlaMixin` 使用）。
+当样本数 × 每样本字节超过 `--max-memory-mb` 预算，累加缓冲落到临时文件映射，换 **I/O 带宽** 换 **RAM**——见 [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py) 中 `_allocate_ola_accumulators`（由 `AudioPurifier` 组合的 `SoundfileOlaEngine` 使用）。
 
 **为什么生产者 `put` 带超时 + 毒丸？**  
 阻塞读 + 有界队列：若消费者挂了，生产者不能无限 `put`；毒丸 `None` 让消费者退出，避免死锁。见 [`pcm_producer.py`](../src/facade/pcm_producer.py) 与 PRD **NF-04** 预留的生产者-消费者形态。
@@ -22,8 +22,8 @@
 | 主题 | 定位 | 路径 |
 |------|------|------|
 | 帧起点、hop、窗 | `list_frame_starts` 等 | [`src/facade/ola.py`](../src/facade/ola.py) |
-| 整文件 OLA 主循环、memmap 累加器 | `_run_processing_soundfile`、`_ola_mssa_loop_write`、`_allocate_ola_accumulators` | [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py)（`SoundfileOlaMixin`） |
-| 门面入口与管线构建 | `process_file`、`_run_processing`、`_build_pipeline` | [`src/facade/purifier.py`](../src/facade/purifier.py) |
+| 整文件 OLA 主循环、memmap 累加器 | `run_soundfile_ola`、`_ola_mssa_loop_write`、`_allocate_ola_accumulators` | [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py)（`SoundfileOlaEngine`） |
+| 门面入口与单帧链组装 | `process_file`、`_run_processing`、`_make_denoise_frame_fn`（`partial` 绑定 [`process_frame`](../src/core/process_frame.py)） | [`src/facade/purifier.py`](../src/facade/purifier.py) |
 | 有界队列、超时 `put`、毒丸 `None` | 队列容量常量与消费者协议 | [`src/facade/pcm_producer.py`](../src/facade/pcm_producer.py) |
 | 路径白名单 | `validate_io_paths`、后缀集合 | [`src/io/audio_formats.py`](../src/io/audio_formats.py) |
 
@@ -40,6 +40,6 @@
 ## 晦涩点与建议
 
 - **晦涩**：整文件 OLA 与 PCM 队列曾集中在门面单文件，现已拆入 [`soundfile_ola.py`](../src/facade/soundfile_ola.py)；线程与累加器仍要对照两处。  
-- **建议**：阅读顺序：`process_file` → `_run_processing` → `_run_processing_soundfile`（均在 `purifier` / mixin 链上）。先画「主线程：OLA 循环；子线程：读块」的时序图，再对照 `_run_processing_soundfile`。
+- **建议**：阅读顺序：`process_file` → `_run_processing` → `SoundfileOlaEngine.run_soundfile_ola`（`purifier` 组合引擎）。先画「主线程：OLA 循环；子线程：读块」的时序图，再对照 `soundfile_ola.py` 内实现。
 
 **下一章**：异常、测试与「工业级」边界。

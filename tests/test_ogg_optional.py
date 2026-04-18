@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from src.facade.purifier import MSSAPurifierBuilder
+from src.facade.purifier import AudioPurifier
 from src.io.sndfile_capabilities import can_write_ogg_vorbis
 
 
@@ -27,13 +27,11 @@ def test_flac_to_ogg_e2e(tmp_path: Path, require_ogg_write: None) -> None:
     stereo = (0.01 * rng.standard_normal((300, 2))).astype(np.float64)
     sf.write(inp, stereo, 48_000, format="FLAC", subtype="PCM_24")
 
-    purifier = (
-        MSSAPurifierBuilder()
-        .set_window_length(16)
-        .set_truncation_rank(8)
-        .set_frame_size(64)
-        .set_hop_size(32)
-        .build()
+    purifier = AudioPurifier(
+        window_length=16,
+        truncation_rank=8,
+        frame_size=64,
+        hop_size=32,
     )
     purifier.process_file(str(inp), str(out))
 

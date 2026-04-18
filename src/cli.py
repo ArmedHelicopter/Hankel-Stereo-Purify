@@ -9,8 +9,13 @@ import os
 import sys
 from collections.abc import Callable
 
-from src.core.exceptions import ConfigurationError, HankelPurifyError
-from src.facade.purifier import MSSAPurifierBuilder
+from src.core.exceptions import (
+    ConfigurationError,
+    HankelPurifyError,
+    ProcessingError,
+    format_exception_origin,
+)
+from src.facade.purifier import AudioPurifier
 from src.utils.logger import get_logger
 
 _CLI_VERSION = "0.1.0"
@@ -140,25 +145,31 @@ def main(argv: list[str] | None = None) -> None:
             sys.exit(2)
 
     try:
-        builder = (
-            MSSAPurifierBuilder()
-            .set_window_length(args.window_length)
-            .set_max_working_memory_bytes(args.max_memory_mb * 1024 * 1024)
-        )
+        mem_b = args.max_memory_mb * 1024 * 1024
         if args.energy_fraction is not None:
-            builder = builder.set_energy_fraction(args.energy_fraction)
+            purifier = AudioPurifier(
+                args.window_length,
+                energy_fraction=args.energy_fraction,
+                frame_size=args.frame_size,
+                hop_size=args.hop,
+                max_working_memory_bytes=mem_b,
+                max_input_samples=args.max_samples,
+                w_corr_threshold=float(args.w_corr_threshold)
+                if args.w_corr_threshold is not None
+                else None,
+            )
         else:
-            rank = args.rank if args.rank is not None else 64
-            builder = builder.set_truncation_rank(rank)
-        if args.frame_size is not None:
-            builder = builder.set_frame_size(args.frame_size)
-        if args.hop is not None:
-            builder = builder.set_hop_size(args.hop)
-        if args.max_samples is not None:
-            builder = builder.set_max_input_samples(args.max_samples)
-        if args.w_corr_threshold is not None:
-            builder = builder.set_w_corr_threshold(float(args.w_corr_threshold))
-        purifier = builder.build()
+            purifier = AudioPurifier(
+                args.window_length,
+                truncation_rank=args.rank if args.rank is not None else 64,
+                frame_size=args.frame_size,
+                hop_size=args.hop,
+                max_working_memory_bytes=mem_b,
+                max_input_samples=args.max_samples,
+                w_corr_threshold=float(args.w_corr_threshold)
+                if args.w_corr_threshold is not None
+                else None,
+            )
         mode = (
             f"energy={purifier.energy_fraction}"
             if purifier.energy_fraction is not None
@@ -178,6 +189,20 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(2)
     except HankelPurifyError as exc:
         logger.error("%s", exc)
+        if isinstance(exc, ProcessingError) and exc.origin_exception_type is not None:
+            logger.error("Origin exception type: %s", exc.origin_exception_type)
+        if isinstance(exc, ProcessingError) and exc.__cause__ is not None:
+            logger.error(
+                "Caused by [%s]: %s",
+                format_exception_origin(exc.__cause__),
+                exc.__cause__,
+            )
+        if (
+            isinstance(exc, ProcessingError)
+            and exc.code is not None
+            and os.environ.get("HSP_DEBUG", "").strip().lower() in ("1", "true", "yes")
+        ):
+            logger.info("ProcessingFailureCode: %s", exc.code.value)
         sys.exit(1)
     except KeyboardInterrupt:
         raise

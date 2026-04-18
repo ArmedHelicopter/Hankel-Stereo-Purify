@@ -65,7 +65,7 @@ SVD 求解（如 QR 迭代或分治法）属于强迭代数值算法，包含大
 - 进程仅读写**用户显式传入的本地路径**，无网络服务面。
 - 输入/输出扩展名由 [`src/io/audio_formats.py`](../src/io/audio_formats.py) **白名单**约束；不根据用户字符串执行外部解码器命令。
 - **同一路径/硬链接**：[`AudioPurifier._validate_paths`](../src/facade/purifier.py) 使用解析路径比较与 `samefile`；若 `samefile` 因权限/跨设备失败则**保守拒绝**（`ConfigurationError`），避免无法判定是否覆盖同一 inode。校验与后续打开之间存在典型 **TOCTOU**（路径被替换）窗口；本地批处理工具按「用户显式路径」信任模型处理，不防恶意同机竞态。
-- **并发**：解码由 [`src/facade/pcm_producer.py`](../src/facade/pcm_producer.py) **生产者线程**推入有界队列；主线程在 [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py)（`SoundfileOlaMixin`，由 [`AudioPurifier`](../src/facade/purifier.py) 混入）侧消费并执行 OLA+MSSA，**毒丸** `None` 结束消费。数值流水线无多线程并行。
+- **并发**：解码由 [`src/facade/pcm_producer.py`](../src/facade/pcm_producer.py) **生产者线程**推入有界队列；主线程在 [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py)（[`SoundfileOlaEngine`](../src/facade/soundfile_ola.py)，由 [`AudioPurifier`](../src/facade/purifier.py) 组合）侧消费并执行 OLA+MSSA，**毒丸** `None` 结束消费。数值流水线无多线程并行。
 
 ### 4.2 环境变量（日志与粗测）
 
@@ -75,14 +75,15 @@ SVD 求解（如 QR 迭代或分治法）属于强迭代数值算法，包含大
 | `HSP_PROFILE_OLA` | 设为 `1`/`true`/`yes` 时记录整段 OLA+MSSA 的 wall time。 |
 | `HSP_LOG_IO_TRACE` | 设为 `1`/`true`/`yes` 时在 [`audio_stream.py`](../src/io/audio_stream.py) 打开路径时多打一条 INFO（默认关）。**不**实现读超时；NFS 等慢路径仍可能阻塞。 |
 | `HSP_MAX_SAMPLES` | 正整数时拒绝超过该**每声道样本数**的输入；非法非空值在构建 [`AudioPurifier`](../src/facade/purifier.py) 时 `ConfigurationError`。命令行 `--max-samples` 优先。 |
+| `HSP_DEBUG` | 设为 `1`/`true`/`yes` 时：对未包装为 `HankelPurifyError` 的顶层异常打印完整回溯；对 `ProcessingError` 额外 INFO 打印 `ProcessingFailureCode`（若存在）。`Origin exception type` 的打印与 `HSP_DEBUG` 无关（见 README 环境变量表）。 |
 
 ### 4.3 性能主因与帧数估计
 
-- **主 CPU 成本**：每 OLA 帧一次 **SVD 数值分解**（[`c_svd.py`](../src/core/stages/c_svd.py)）。**固定秩**：`k < min(m,n)` 时优先 `svds`，否则一次 dense `scipy.linalg.svd` 后截断。**能量阈值**：每帧需完整奇异值谱，故每帧一次 dense `scipy.linalg.svd`。帧数随 `list_frame_starts(N, frame_size, hop)` 增长；单帧矩阵约为 \(L \times 2K\)（\(K=\) `frame_size` \(-L+1\)），渐近阶常记 \(O(\min(L,2K)^3)\) 量级（与 README 一致）。
+- **主 CPU 成本**：每 OLA 帧一次 **SVD 数值步骤**（[`c_svd.py`](../src/core/stages/c_svd.py)）。**固定秩**：`k < min(m,n)` 时优先 `svds`，否则一次 dense `scipy.linalg.svd` 后截断。**能量阈值**：按能量定秩需足够部分谱信息；实现为多次 `svds` 试探并可能退化为一次 dense `scipy.linalg.svd`（最坏与每帧全谱相当），而非必然每帧 full SVD。帧数随 `list_frame_starts(N, frame_size, hop)` 增长；单帧矩阵约为 \(L \times 2K\)（\(K=\) `frame_size` \(-L+1\)），dense 全谱时的渐近阶常记 \(O(\min(L,2K)^3)\) 量级（与 README 一致）。
 - **脚本**：[`scripts/estimate_ola_frames.py`](../scripts/estimate_ola_frames.py) 打印帧起点个数；可加 `--window-length L` 打印 \(\min(L,2K)\) 供粗算。
 
 ### 4.4 异常分层（面向调用方）
 
 - **I/O / 格式**：`AudioIOError`（含 libsndfile 映射）。
 - **配置**：`ConfigurationError`。
-- **数值 / 处理**：`ProcessingError`（例如 `numpy.linalg.LinAlgError` 与未预期内部错误在 [`process_file`](../src/facade/purifier.py) 中映射），与上述类型均继承 `HankelPurifyError`。CLI：[`src/cli.py`](../src/cli.py) 对 `ConfigurationError` 使用退出码 **2**，其余 `HankelPurifyError` 使用 **1**（见 README「退出码」）。
+- **数值 / 处理**：`ProcessingError`（例如 `numpy.linalg.LinAlgError` 与未预期内部错误在 [`process_file`](../src/facade/purifier.py) 中映射），与上述类型均继承 `HankelPurifyError`。包装时写入 **`origin_exception_type`**（`module.QualName`，见 [`exceptions.py`](../src/core/exceptions.py)），CLI 失败路径会打印该行。CLI：[`src/cli.py`](../src/cli.py) 对 `ConfigurationError` 使用退出码 **2**，其余 `HankelPurifyError` 使用 **1**（见 README「退出码」）。

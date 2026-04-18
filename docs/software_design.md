@@ -1,70 +1,69 @@
 # 软件设计与架构规约 (Software Design Specification)
 
 ## 1. 架构原则 (Architectural Principles)
-本项目 (`Hankel-Stereo-Purify`) 的纯软件实现阶段严格遵循高内聚、低耦合的面向对象设计原则。为支持团队并行开发并规避代码冲突，核心数据流必须与具体数学算子的实现解耦。
 
-## 2. 核心设计模式矩阵 (Core Design Patterns)
+本项目 (`Hankel-Stereo-Purify`) 以**可验证的数值路径**与**清晰的 I/O 边界**为先：核心 MSSA 步骤以普通函数与可调用对象表达，避免仅为“模式”而增加调度层。
 
-系统底层架构基于以下四种经典 GoF 设计模式构建：
+## 2. 当前实现要点（与代码一致）
 
-### 2.1 流水线模式 (Pipeline / Chain of Responsibility)
-* **应用场景：** 解耦 MSSA 算法的四个核心数学模块（A-Hankel化, B-通道拼接, C-SVD截断, D-对角重构）。
-* **规约：** * 定义统一的抽象基类 `MSSAStage`。
-  * 任何数学模块必须继承该基类并实现单一的 `execute(data)` 方法。
-  * 严禁模块之间直接互相调用。所有模块由外部的 Pipeline 调度器按顺序传入和传出张量数据。
+### 2.1 MSSA 数值链（`process_frame` 单函数）
 
-### 2.2 策略模式 (Strategy Pattern)
-* **应用场景：** 动态切换算法细节（如降维截断策略、加窗平滑函数）。
-* **规约：**
-  * 定义 `TruncationStrategy` 接口（含 `get_k()` 方法）。
-  * 派生具体策略类，如 `FixedRankStrategy`（固定秩）和 `EnergyThresholdStrategy`（能量阈值）。
-  * 核心 SVD 模块只调用策略接口，不包含具体的阈值判断 `if-else` 逻辑。
-  * **可选 W-correlation（`CSVDStage`）**：`w_corr_threshold` 与 `compute_w_correlation_matrix` 输出的 `W[i,0]` 比较（阈值须在 `[0,1]`，与矩阵元素同域）。能量自适应秩模式下仅在**首帧**完整计算保留分量下标，后续帧与当前秩求交后复用，避免每帧重算整张 `W`（详见 `c_svd.py` 类文档）。
+单帧处理由 [`process_frame`](../src/core/process_frame.py) 顺序调用 [`hankel_embed`](../src/core/stages/a_hankel.py) → [`combine_hankel_blocks`](../src/core/stages/b_multichannel.py) → [`make_svd_step`](../src/core/stages/c_svd.py) 返回的闭包 → [`diagonal_reconstruct`](../src/core/stages/d_diagonal.py)。[`AudioPurifier`](../src/facade/purifier.py) 在 `_make_denoise_frame_fn` 中用 `functools.partial(process_frame, window_length=..., svd_step=...)` 绑定参数，无 Stage 类或 Pipeline 对象。
 
-### 2.3 外观模式 (Facade Pattern)
-* **应用场景：** 向命令行（[`src/cli.py`](../src/cli.py)）与可选控制平面（仓库根目录 [`frontend/app.py`](../frontend/app.py)，Streamlit EDA + 全量任务子进程）隐藏重叠相加（Overlap-Add）、PCM 生产者线程与流式读取的状态机。
-* **规约：**
-  * 封装顶层类 `AudioPurifier`（整文件 OLA 与队列逻辑在 [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py) 的 `SoundfileOlaMixin` 中，由 `AudioPurifier` 混入）。
-  * 对外仅暴露极其简单的 API，例如 `process_file(input_path, output_path)`。CLI 与前端不得直接操作 `numpy` 矩阵或实例化底层的 `MSSAStage` 模块；全量批处理应通过子进程调用 CLI（见 PRD NF-05）。
+库与 CLI 均通过 **`AudioPurifier(...)`** 构造门面（构造函数内完成参数校验）。
 
-### 2.4 建造者模式 (Builder Pattern)
-* **应用场景：** 管理系统初始化时庞杂的超参数（$L, k$, 帧长，跳步）。
-* **规约：**
-  * 使用 `MSSAPurifierBuilder` 提供链式调用接口（Fluent Interface）。
-  * 确保系统实例化时的参数校验（如帧长必须大于跳步）在 Builder 内部完成，防止产生非法状态的处理器实例。
-  * 环境变量 `HSP_MAX_SAMPLES`（与 CLI `--max-samples` 对应）在 **`build()` 构造 `AudioPurifier` 时**即参与解析；若值为非法非空整数，应在该阶段抛出 `ConfigurationError`，而非推迟到 `process_file`。
+### 2.2 截断配置（非经典 Strategy 多态）
+
+* **类型：** [`FixedRankStrategy`](../src/core/strategies/truncation.py) 与 [`EnergyThresholdStrategy`](../src/core/strategies/truncation.py) 为两个独立配置类；`TruncationStrategy` 在源码中为 **`FixedRankStrategy | EnergyThresholdStrategy` 的类型别名**，**不是**抽象基类。`make_svd_step` 在**构造闭包时**按具体类型分支，而非运行期虚表派发。
+* **W-correlation（可选）：** 在 `make_svd_step` 内对奇异值向量做过滤；能量模式下首帧可标定保留索引并缓存（见 `c_svd.py`）。算力上：rank-1 重构与批量反对角平均为 **\(O(k \cdot m \cdot n)\)** 量级（\(k\) 为截断秩上界），`compute_w_correlation_matrix` 为 **\(O(k^2 \cdot L_{\text{seq}})\)**（\(L_{\text{seq}}=m+n-1\)）；未开启时无此两项。单帧对角阶段占比可用 `python scripts/benchmark_pipeline.py --diag-split` 观察。
+* **可观测性（门面）：** `process_file` 将 MSSA 链上的 `ValueError` 映射为 `ProcessingError` 时，日志含 **`format_exception_origin`** 给出的 `文件名:行号:函数`；CLI 对 `ProcessingError` 额外打印 **`__cause__` 来源**，便于区分 `c_svd` / `d_diagonal` / 配置校验等，而无需解析异常字符串。
+
+### 2.3 外观 (`AudioPurifier` + `SoundfileOlaEngine`)
+
+* [`AudioPurifier`](../src/facade/purifier.py)：`process_file`、路径与配置校验、构造单帧去噪函数；组合 [`SoundfileOlaEngine`](../src/facade/soundfile_ola.py) 执行整文件流式路径。
+* [`SoundfileOlaEngine`](../src/facade/soundfile_ola.py)：OLA 主循环、PCM 队列、可选 memmap（不再以 Mixin 混入）。
+* CLI：[`src/cli.py`](../src/cli.py)；可选前端：仓库根目录 [`frontend/app.py`](../frontend/app.py)。
+
+### 2.4 超参数构造
+
+* 超参数在 **`AudioPurifier(...)`** 构造时校验（`truncation_rank` 与 `energy_fraction` 互斥等）。
+* 环境变量 `HSP_MAX_SAMPLES` 与 CLI `--max-samples` 在 **构造阶段** 解析；非法值抛出 `ConfigurationError`。
+
+### 2.5 与架构批判的对照（实现现状，非新增抽象）
+
+以下与「薄封装 / 热路径 / 异常分桶」类审查结论对齐，避免文档与执行路径脱节：
+
+* **调度层：** 已移除独立的 Stage 类、`MssaFramePipeline` 与 `AudioPurifierBuilder`；单帧数学链由 [`process_frame`](../src/core/process_frame.py) 直接表达，截断与 W-correlation 逻辑仍在 [`c_svd.py`](../src/core/stages/c_svd.py) 的 `make_svd_step` 闭包内。
+* **反对角平均：** [`d_diagonal.py`](../src/core/stages/d_diagonal.py) 对固定 `(m,n)` 预计算 `t_flat = i+j`，用 `numpy.bincount` 聚合；仅对 batch 维（如立体声 `B=2`）做 Python 循环，**不再**为全量 scatter 分配 `O(B·mn)` 整型索引表。
+* **W-correlation / 能量路径：** 可选 W-correlation 与能量截断的算力与内存阶见 §2.2；能量模式含对同一矩阵的多次 `svds` 探测与可能的全 `svd` 回退，行为由常量帽与浮点容差约束，**非闭式一步解**。
+* **门面异常：** `process_file` 对线性代数与 ARPACK 异常显式映射；`ValueError` 映射为 `ProcessingError` 并记录 `format_exception_origin`；其余未捕获类型落入 `except Exception` 并记完整栈（`logger.exception`），对外仍为泛化文案——**属刻意粗分桶**，排障依赖日志与 `__cause__` 链。所有经门面包装的 [`ProcessingError`](../src/core/exceptions.py) 均带可机读字段 **`origin_exception_type`**（``module.QualName``，由 [`exception_fully_qualified_name`](../src/core/exceptions.py) 生成），CLI 在失败时额外打印该行，便于区分例如 `builtins.MemoryError` 与未单独映射的数值栈类型。
 
 ## 3. 标准化工程目录映射 (Directory Structure)
 
-基于上述模式，代码库的 `src/` 目录结构被严格限定如下。团队成员需在各自负责的子目录内独立开发：
-
 ```text
 src/
-├── core/                   # 核心计算逻辑 (纯粹的数学与张量操作)
-│   ├── pipeline.py         # 流水线调度器与 MSSAStage 抽象类
-│   ├── stages/             # 流水线节点
+├── core/
+│   ├── array_types.py      # FloatArray 等 ndarray 类型别名（原 pipeline.py 仅类型，无调度器）
+│   ├── process_frame.py    # 单帧 MSSA A→D（`process_frame`）
+│   ├── pipeline/            # 兼容 re-export：`from .pipeline import process_frame`
+│   ├── stages/               # hankel / multichannel / svd / diagonal 函数与工厂
 │   │   ├── a_hankel.py
 │   │   ├── b_multichannel.py
 │   │   ├── c_svd.py
 │   │   └── d_diagonal.py
-│   └── strategies/         # 策略与辅助
-│       ├── truncation.py   # 截断策略
-│       ├── windowing.py    # 加窗策略
-│       └── grouping.py     # W-correlation 矩阵（管线内可选过滤）
-├── io/                     # 数据流边界（libsndfile）
-│   ├── audio_stream.py     # 块读取与元数据
-│   ├── audio_formats.py    # 后缀白名单与写出参数
-│   ├── stereo_soundfile.py # 立体声约束等
-│   ├── sndfile_capabilities.py
-│   └── io_messages.py      # 统一 I/O 错误文案
-├── facade/                 # 顶层外观
-│   ├── purifier.py         # AudioPurifier、MSSAPurifierBuilder、process_file 入口
-│   ├── soundfile_ola.py    # SoundfileOlaMixin：OLA 主循环、memmap、PCM 队列侧消费
-│   ├── pcm_producer.py     # 生产者线程：有界队列 + 毒丸
-│   └── ola.py              # 帧起点、Hanning、OLA 辅助
+│   └── strategies/
+│       ├── truncation.py
+│       ├── windowing.py
+│       └── grouping.py
+├── io/
+├── facade/
+│   ├── purifier.py           # AudioPurifier、process_file
+│   ├── soundfile_ola.py    # SoundfileOlaEngine：OLA + 队列 + memmap
+│   ├── pcm_producer.py
+│   └── ola.py
 ├── utils/
 │   └── logger.py
-└── cli.py                  # 数据平面：命令行入口
+└── cli.py
 ```
 
-与 `src/` **并列**于仓库根目录：**可选** Streamlit 控制平面 [`frontend/app.py`](../frontend/app.py)（PRD F-05；依赖 [`requirements-frontend.txt`](../requirements-frontend.txt)）。数据平面主路径仍为 `src/cli.py`。
+与 `src/` **并列**：可选 Streamlit [`frontend/app.py`](../frontend/app.py)。数据平面主路径为 `src/cli.py`。

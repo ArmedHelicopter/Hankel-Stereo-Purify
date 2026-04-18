@@ -1,7 +1,8 @@
-"""Soundfile + OLA + PCM producer loop extracted from ``AudioPurifier`` for readability.
+"""Soundfile + OLA + PCM producer loop used by ``AudioPurifier`` via composition.
 
-Thread entrypoint uses ``src.facade.purifier._producer_fill_queue`` via lazy import
-so tests can monkeypatch that symbol without importing ``purifier`` at module load time.
+The producer thread target is injected (default: ``pcm_producer.producer_fill_queue``)
+so tests can substitute ``src.facade.purifier._producer_fill_queue`` without a lazy
+import cycle between this module and ``purifier``.
 """
 
 from __future__ import annotations
@@ -11,8 +12,9 @@ import os
 import queue
 import tempfile
 import threading
+from collections.abc import Callable
 from queue import Queue
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import Any, NamedTuple
 
 import numpy as np
 import soundfile as sf
@@ -20,9 +22,14 @@ from numpy.typing import NDArray
 from tqdm import tqdm
 
 from src.core.exceptions import AudioIOError, ConfigurationError
-from src.core.pipeline import Pipeline
 from src.facade.ola import list_frame_starts
-from src.facade.pcm_producer import PCM_QUEUE_MAXSIZE, PRODUCER_JOIN_TIMEOUT_S
+from src.facade.pcm_producer import (
+    PCM_QUEUE_MAXSIZE,
+    PRODUCER_JOIN_TIMEOUT_S,
+)
+from src.facade.pcm_producer import (
+    producer_fill_queue as default_producer_fill_queue,
+)
 from src.io.audio_formats import soundfile_write_kwargs
 from src.io.audio_stream import read_audio_metadata
 from src.io.io_messages import (
@@ -44,17 +51,21 @@ class SfOlaPrep(NamedTuple):
     block_size: int
 
 
-class SoundfileOlaMixin:
-    """PCM queue + OLA/MSSA accumulation + soundfile write.
+class SoundfileOlaEngine:
+    """PCM queue + OLA/MSSA accumulation + soundfile write."""
 
-    Mixed into ``AudioPurifier``. Expects ``logger``, ``frame_size``, ``hop_size``,
-    ``max_working_memory_bytes``, ``max_input_samples``.
-    """
-
-    if TYPE_CHECKING:
-        logger: Any
-        max_input_samples: int | None
-        max_working_memory_bytes: int
+    def __init__(
+        self,
+        *,
+        logger: Any,
+        max_input_samples: int | None,
+        max_working_memory_bytes: int,
+        producer_fill_queue: Callable[..., None] = default_producer_fill_queue,
+    ) -> None:
+        self.logger = logger
+        self.max_input_samples = max_input_samples
+        self.max_working_memory_bytes = max_working_memory_bytes
+        self._producer_fill_queue = producer_fill_queue
 
     @staticmethod
     def _raise_if_producer_failed(
@@ -178,10 +189,8 @@ class SoundfileOlaMixin:
         producer_error: list[BaseException],
         abort_event: threading.Event,
     ) -> threading.Thread:
-        from src.facade import purifier as purifier_mod
-
         th = threading.Thread(
-            target=purifier_mod._producer_fill_queue,
+            target=self._producer_fill_queue,
             name="HSP-AudioProducer",
             args=(
                 input_path,
@@ -200,7 +209,7 @@ class SoundfileOlaMixin:
         *,
         prep: SfOlaPrep,
         output_path: str,
-        pipeline: Pipeline,
+        denoise_frame: Callable[[NDArray[np.float64]], NDArray[np.float64]],
         f_size: int,
         w_sqrt: NDArray[np.float64],
         w_sq: NDArray[np.float64],
@@ -239,7 +248,7 @@ class SoundfileOlaMixin:
                 frame[:need] = buf[rel : rel + need]
 
                 np.multiply(frame, w_sqrt, out=x_win_buf)
-                denoised: NDArray[np.float64] = pipeline.execute(x_win_buf)
+                denoised: NDArray[np.float64] = denoise_frame(x_win_buf)
                 np.multiply(denoised, w_sqrt, out=weighted_buf)
                 end = min(start + f_size, num_samples)
                 sl = end - start
@@ -291,16 +300,17 @@ class SoundfileOlaMixin:
                     PRODUCER_JOIN_TIMEOUT_S,
                 )
 
-    def _run_processing_soundfile(
+    def run_soundfile_ola(
         self,
         input_path: str,
         output_path: str,
-        pipeline: Pipeline,
+        denoise_frame: Callable[[NDArray[np.float64]], NDArray[np.float64]],
         f_size: int,
         hop: int,
         w_sqrt: NDArray[np.float64],
         w_sq: NDArray[np.float64],
     ) -> None:
+        """Stream input, run per-frame MSSA via ``denoise_frame``, OLA, write output."""
         prep = self._prepare_sf_ola_prep(input_path, output_path, f_size, hop)
         pcm_queue: Queue[NDArray[np.float64] | None] = Queue(
             maxsize=PCM_QUEUE_MAXSIZE,
@@ -332,7 +342,7 @@ class SoundfileOlaMixin:
                     self._ola_mssa_loop_write(
                         prep=prep,
                         output_path=output_path,
-                        pipeline=pipeline,
+                        denoise_frame=denoise_frame,
                         f_size=f_size,
                         w_sqrt=w_sqrt,
                         w_sq=w_sq,

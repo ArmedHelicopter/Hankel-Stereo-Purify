@@ -4,6 +4,11 @@
 When ``--w-corr-threshold`` is set, stage C includes W-correlation work; expect
 noticeably higher per-frame time than the default (no W filter), especially in
 energy mode where the first frame pays full W setup.
+
+Use ``--diag-split`` to print what fraction of stage D wall time is
+``batched_diagonal_average`` vs full ``diagonal_reconstruct`` (same tensor).
+There is no repo-wide fixed threshold: use the ratio on your target ``L``, ``F``
+to judge whether the diagonal kernel is worth further work.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ import io
 import pstats
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -22,11 +28,15 @@ _REPO = Path(__file__).resolve().parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
+from src.core.array_types import FloatArray  # noqa: E402
 from src.core.exceptions import validate_w_corr_threshold  # noqa: E402
-from src.core.stages.a_hankel import AHankelStage  # noqa: E402
-from src.core.stages.b_multichannel import BMultichannelStage  # noqa: E402
-from src.core.stages.c_svd import CSVDStage  # noqa: E402
-from src.core.stages.d_diagonal import DDiagonalStage  # noqa: E402
+from src.core.stages.a_hankel import hankel_embed  # noqa: E402
+from src.core.stages.b_multichannel import combine_hankel_blocks  # noqa: E402
+from src.core.stages.c_svd import make_svd_step  # noqa: E402
+from src.core.stages.d_diagonal import (  # noqa: E402
+    batched_diagonal_average,
+    diagonal_reconstruct,
+)
 from src.core.strategies.truncation import (  # noqa: E402
     EnergyThresholdStrategy,
     FixedRankStrategy,
@@ -73,6 +83,14 @@ def main() -> None:
         action="store_true",
         help="Dump cProfile top functions for one C+D run",
     )
+    p.add_argument(
+        "--diag-split",
+        action="store_true",
+        help=(
+            "Report median time share of batched_diagonal_average inside "
+            "diagonal_reconstruct (stage D)"
+        ),
+    )
     args = p.parse_args()
     if args.w_corr_threshold is not None:
         validate_w_corr_threshold(float(args.w_corr_threshold))
@@ -87,22 +105,20 @@ def main() -> None:
 
     stereo = np.ascontiguousarray(rng.standard_normal((f_samples, 2)), dtype=np.float64)
 
-    ah = AHankelStage(window_length=win_len)
-    b = BMultichannelStage()
-    d = DDiagonalStage()
-
-    def run_stages(c_stage: CSVDStage) -> tuple[float, float, float, float]:
+    def run_stages(
+        svd_step: Callable[[FloatArray], FloatArray],
+    ) -> tuple[float, float, float, float]:
         t0 = time.perf_counter()
-        hl, hr = ah.execute(stereo)
+        hl, hr = hankel_embed(win_len, stereo)
         t_a = time.perf_counter() - t0
         t0 = time.perf_counter()
-        joint = b.execute((hl, hr))
+        joint = combine_hankel_blocks(hl, hr)
         t_b = time.perf_counter() - t0
         t0 = time.perf_counter()
-        mid = c_stage.execute(joint)
+        mid = svd_step(joint)
         t_c = time.perf_counter() - t0
         t0 = time.perf_counter()
-        _ = d.execute(mid)
+        _ = diagonal_reconstruct(mid)
         t_d = time.perf_counter() - t0
         return t_a, t_b, t_c, t_d
 
@@ -113,8 +129,7 @@ def main() -> None:
     else:
         strat = FixedRankStrategy(k_trunc)
 
-    # Baseline C (no W-corr); median over repeats after warmup
-    c_base = CSVDStage(strat)
+    c_base = make_svd_step(strat)
     times_a: list[float] = []
     times_b: list[float] = []
     times_c: list[float] = []
@@ -138,19 +153,51 @@ def main() -> None:
     print(f"Stage D (diag avg):     {md * 1e3:.3f} ms  ({100 * md / tot:.1f}%)")
     print(f"Total (median):         {tot * 1e3:.3f} ms")
 
+    if args.diag_split:
+
+        def _d_split_times() -> tuple[float, float]:
+            hl, hr = hankel_embed(win_len, stereo)
+            joint = combine_hankel_blocks(hl, hr)
+            mid = c_base(joint)
+            t0 = time.perf_counter()
+            _ = diagonal_reconstruct(mid)
+            t_full = time.perf_counter() - t0
+            _, ncols = mid.shape
+            kd = ncols // 2
+            both = np.stack((mid[:, :kd], mid[:, kd:]), axis=0)
+            t0 = time.perf_counter()
+            _ = batched_diagonal_average(both)
+            t_bat = time.perf_counter() - t0
+            return t_full, t_bat
+
+        for _ in range(args.warmup):
+            _d_split_times()
+        tfs: list[float] = []
+        tbs: list[float] = []
+        for _ in range(args.repeats):
+            tf, tb = _d_split_times()
+            tfs.append(tf)
+            tbs.append(tb)
+        mf, mb_ = map(_median, (tfs, tbs))
+        if mf > 1e-18:
+            print(
+                f"Stage D split: batched_diagonal_average {100 * mb_ / mf:.1f}% "
+                f"of diagonal_reconstruct wall time (median, same mid tensor)"
+            )
+
     if args.w_corr_threshold is not None:
-        c_w = CSVDStage(
+        c_w = make_svd_step(
             strat,
             w_corr_threshold=float(args.w_corr_threshold),
             window_length=win_len,
         )
-        hl, hr = ah.execute(stereo)
-        joint = b.execute((hl, hr))
+        hl, hr = hankel_embed(win_len, stereo)
+        joint = combine_hankel_blocks(hl, hr)
         t0 = time.perf_counter()
-        _ = c_w.execute(joint)
+        _ = c_w(joint)
         cold = time.perf_counter() - t0
         t0 = time.perf_counter()
-        _ = c_w.execute(joint)
+        _ = c_w(joint)
         hot = time.perf_counter() - t0
         print(f"Stage C W-corr cold (1st): {cold * 1e3:.3f} ms")
         print(f"Stage C W-corr hot  (2nd): {hot * 1e3:.3f} ms")
@@ -158,13 +205,13 @@ def main() -> None:
             print(f"Hot/Cold ratio: {hot / cold:.3f}")
 
     if args.cprofile:
-        c_prof = CSVDStage(strat)
-        hl, hr = ah.execute(stereo)
-        joint = b.execute((hl, hr))
+        c_prof = make_svd_step(strat)
+        hl, hr = hankel_embed(win_len, stereo)
+        joint = combine_hankel_blocks(hl, hr)
         pr = cProfile.Profile()
         pr.enable()
-        recon = c_prof.execute(joint)
-        _ = d.execute(recon)
+        recon = c_prof(joint)
+        _ = diagonal_reconstruct(recon)
         pr.disable()
         sio = io.StringIO()
         pstats.Stats(pr, stream=sio).sort_stats("cumulative").print_stats(25)

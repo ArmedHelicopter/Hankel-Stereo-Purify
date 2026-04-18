@@ -11,7 +11,7 @@
 ### 1.1 核心模块
 
 - `src/io`：音频 I/O 与流式预处理
-- `src/core`：MSSA 算法流水线与数学模块
+- `src/core`：MSSA 数学阶段（`stages/`）、单帧组装 [`process_frame.py`](../src/core/process_frame.py)、策略与异常
 - `src/facade`：顶层接口与 CLI 集成
 - 项目已统一为当前 [`src/`](../src/) 分层（`core/`、`facade/`、`io/` 等）；历史平铺模块文件名不再维护
 
@@ -19,7 +19,7 @@
 
 - 先“做可运行 MVP”再“做抽象优化”
 - 保持高内聚、低耦合，接口契约优先
-- 以 `Pipeline`、`Strategy`、`Facade` 为主线，避免过度设计
+- 以 **函数式阶段**（A–D）、`TruncationStrategy`、`AudioPurifier` 门面为主线，避免过度设计
 
 ---
 
@@ -36,7 +36,7 @@
 ### 成员 B：核心 MSSA 算法
 
 职责：
-- 实现 `src/core/pipeline.py`
+- 实现 `src/core/array_types.py`（类型别名）与各阶段模块的导入边界
 - 实现 `src/core/stages/a_hankel.py`
 - 实现 `src/core/stages/b_multichannel.py`
 - 实现 `src/core/stages/c_svd.py`
@@ -64,7 +64,7 @@
 任务：
 - 确认最终目录结构与模块分工
 - 完成 `AudioStream` 接口草案
-- 完成 `Pipeline` / `MSSAStage` 框架
+- 完成 **A–D 阶段函数**与 `make_svd_step` 闭包式 SVD 步（无独立 Pipeline 调度类）
 - 搭建 `AudioPurifier` 流程草图
 - 在小样本上验证数据流是否能通
 
@@ -125,12 +125,11 @@
 
 ### 风险 1：目录结构与实现方式不一致
 
-- 原因：`src/` 同时存在旧结构与新 `src/core/...` 结构
+- 原因：历史上曾出现顶层平铺与 `src/core/...` 并存
 - 影响：团队成员可能在不同路径上重复实现，造成冲突和浪费
 
 缓解：
-- 立刻统一主导目录结构，明确“主开发路径”
-- 将旧顶层空模块设为过渡文件或删除
+- **当前仓库**已统一为 [`src/`](../src/) 分层；核心类型模块为 [`array_types.py`](../src/core/array_types.py)（**不再**使用已删除的 `pipeline.py` 命名）
 - 在每日立会上确认各人当前工作文件列表
 
 ### 风险 2：接口契约不明确导致联调失败
@@ -139,7 +138,7 @@
 - 影响：集成时花费大量时间调整数据格式
 
 缓解：
-- 在第 1 周完成接口文档，明确 `Pipeline.execute()` 和 `read_blocks()` 数据结构
+- 在第 1 周完成接口文档，明确单帧去噪链的输入/输出张量形状与 `read_blocks()` 数据结构
 - 成员间用“假数据快速契约测试”验证格式
 - 采用简单的 JSON / 文本说明接口约定
 
@@ -193,7 +192,8 @@
 
 | 里程碑 | 状态 |
 |--------|------|
-| `src/core` A–D 阶段 + `Pipeline` + 截断策略 | 已完成 |
+| `src/core` A–D 阶段 + `make_svd_step` + 截断配置（`FixedRankStrategy` / `EnergyThresholdStrategy`） | 已完成 |
+| `core/pipeline.py` → `array_types.py` 重命名（仅类型别名、无调度器） | 已完成 |
 | `AudioPurifier` 流式 OLA、`--max-memory-mb` memmap 溢出 | 已完成 |
 | `src/cli.py`：固定秩 `-k`、能量 `--energy-fraction`（互斥）、路径校验 | 已完成 |
 | 单元/集成测试、`make check` 与 CI 对齐 | 已完成 |

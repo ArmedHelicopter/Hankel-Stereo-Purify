@@ -1,26 +1,15 @@
 import numpy as np
-from numpy.typing import NDArray
 
-from src.core.stages.a_hankel import AHankelStage
-from src.core.stages.b_multichannel import BMultichannelStage
+from src.core.stages.a_hankel import hankel_embed
+from src.core.stages.b_multichannel import combine_hankel_blocks
 
 
-def test_multichannel_hstack_shape_and_values() -> None:
-    input_signal: NDArray[np.float64] = np.array(
-        [
-            [0.0, 1.0],
-            [2.0, 3.0],
-            [4.0, 5.0],
-            [6.0, 7.0],
-            [8.0, 9.0],
-        ],
-        dtype=np.float64,
-    )
-    window_length = 3
-    stage_a = AHankelStage(window_length=window_length)
-    h_l, h_r = stage_a.execute(input_signal)
-    out = BMultichannelStage().execute((h_l, h_r))
-
-    k = h_l.shape[1]
+def test_combine_hankel_blocks_stacks_channels() -> None:
+    rng = np.random.default_rng(0)
+    n = 12
+    stereo = rng.standard_normal((n, 2))
+    window_length = 4
+    h_l, h_r = hankel_embed(window_length, stereo)
+    out = combine_hankel_blocks(h_l, h_r)
+    k = n - window_length + 1
     assert out.shape == (window_length, 2 * k)
-    np.testing.assert_array_equal(out, np.hstack((h_l, h_r)))

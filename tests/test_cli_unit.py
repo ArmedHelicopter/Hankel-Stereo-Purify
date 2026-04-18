@@ -8,7 +8,7 @@ import soundfile as sf
 
 from src.cli import build_parser, main, parse_args
 from src.core.exceptions import ConfigurationError
-from src.facade.purifier import MSSAPurifierBuilder
+from src.facade.purifier import AudioPurifier
 
 
 def test_parse_args_defaults() -> None:
@@ -204,4 +204,4 @@ def test_invalid_hsp_max_samples_env_raises_on_build(
 ) -> None:
     monkeypatch.setenv("HSP_MAX_SAMPLES", "not_an_int")
     with pytest.raises(ConfigurationError, match="HSP_MAX_SAMPLES"):
-        (MSSAPurifierBuilder().set_window_length(16).set_truncation_rank(8).build())
+        AudioPurifier(16, truncation_rank=8)

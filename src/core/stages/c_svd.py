@@ -1,21 +1,44 @@
-"""SVD stage: Lanczos ``svds`` with full-SVD fallback when ``k >= min(shape)``."""
+"""SVD step: Lanczos ``svds`` with full-SVD fallback when ``k >= min(shape)``."""
 
 from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 import scipy.linalg  # type: ignore[import-untyped]
 from numpy.typing import NDArray
 from scipy.sparse.linalg import svds  # type: ignore[import-untyped]
 
+from ..array_types import FloatArray
 from ..exceptions import validate_w_corr_threshold
-from ..pipeline import FloatArray, MSSAStage
 from ..strategies.grouping import compute_w_correlation_matrix
 from ..strategies.truncation import (
     EnergyThresholdStrategy,
     FixedRankStrategy,
     TruncationStrategy,
 )
-from .d_diagonal import DDiagonalStage
+from .d_diagonal import batched_diagonal_average
+
+# Partial ``svds`` probe iterations before a single full ``scipy.linalg.svd`` fallback.
+# Tests may monkeypatch this (see ``tests/test_c_svd.py``); keep default at 8.
+_SVDS_ENERGY_PROBE_CAP = 8
+
+
+def _energy_frobenius_tol(fro_sq: float) -> float:
+    """Tolerance for Frobenius-energy comparisons (partial vs full spectrum)."""
+    return 1e-12 * max(float(fro_sq), 1.0)
+
+
+@dataclass
+class _SvdStepState:
+    """Per-OLA-run state for :func:`make_svd_step` (W-cache + energy warm-start)."""
+
+    cached_valid_indices: NDArray[np.intp] | None = None
+    cached_k: int | None = None
+    energy_w_corr_frozen: bool = False
+    frozen_w_corr_keep_indices: NDArray[np.intp] | None = None
+    energy_k_prev: int | None = None
 
 
 def _reconstruct_usvh(
@@ -23,11 +46,7 @@ def _reconstruct_usvh(
     s: NDArray[np.float64],
     vh: NDArray[np.float64],
 ) -> FloatArray:
-    """Low-rank ``U @ diag(S) @ Vh`` via column scaling (avoids allocating ``diag(S)``).
-
-    Shapes: ``U`` (m, r), ``S`` (r,), ``Vh`` (r, n); must satisfy
-    ``U.shape[1] == S.shape[0] == Vh.shape[0]``.
-    """
+    """Low-rank ``U @ diag(S) @ Vh`` via column scaling (no ``diag(S)`` matrix)."""
     return (u * s) @ vh
 
 
@@ -36,7 +55,6 @@ def _sort_usvh_descending(
     s: NDArray[np.float64],
     vh: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    """Ensure singular values are descending (``svds`` may return ascending)."""
     if s.size == 0:
         return u, s, vh
     order = np.argsort(s)[::-1]
@@ -47,7 +65,6 @@ def _fixed_rank_truncated_factors(
     a: NDArray[np.float64],
     k_req: int,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    """Top ``k_req`` triplets via ``svds``, or full SVD if ``k_req >= min(shape)``."""
     m, n = int(a.shape[0]), int(a.shape[1])
     mn = min(m, n)
     if k_req >= mn:
@@ -60,6 +77,95 @@ def _fixed_rank_truncated_factors(
     return u[:, :k_eff], s[:k_eff].copy(), vh[:k_eff, :]
 
 
+def _frobenius_squared(a: NDArray[np.float64]) -> float:
+    return float(np.sum(np.square(a)))
+
+
+def _smallest_k_for_threshold_energy(
+    s_desc: NDArray[np.float64],
+    energy_fraction: float,
+    fro_sq: float,
+) -> int | None:
+    """Rank k from partial singular values vs Frobenius energy; None if insufficient."""
+    s_desc = np.asarray(s_desc, dtype=np.float64).ravel()
+    n = int(s_desc.size)
+    if n == 0:
+        return None
+    e = s_desc * s_desc
+    cum = np.cumsum(e)
+    target = energy_fraction * fro_sq
+    tol = _energy_frobenius_tol(fro_sq)
+    if cum[-1] + tol < target:
+        return None
+    idx = int(np.searchsorted(cum, target, side="left"))
+    return max(1, min(idx + 1, n))
+
+
+def _energy_truncated_factors(
+    a: NDArray[np.float64],
+    strat: EnergyThresholdStrategy,
+    state: _SvdStepState,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Energy threshold via partial ``svds`` warm-start; full SVD only when needed.
+
+    The ``for _ in range(_SVDS_ENERGY_PROBE_CAP)`` loop is a **backoff cap**:
+    each iteration probes a larger ``k_probe`` (until ``k_probe >= min(m, n)``,
+    when we take a single full ``scipy.linalg.svd`` and return). If after that
+    many attempts we still
+    cannot certify the energy threshold from partial spectra, we **fall through**
+    to a full ``svd`` (same as the loop body when ``k_probe >= mn``). This
+    bounds worst-case repeated ``svds`` work without changing the mathematical
+    energy rule (which still uses ``strat.get_k`` on the final singular values).
+    """
+    m, n = int(a.shape[0]), int(a.shape[1])
+    mn = min(m, n)
+    fro_sq = _frobenius_squared(a)
+    thr = strat.threshold
+    margin = max(2, min(16, max(mn // 8, 1)))
+
+    k_prev = state.energy_k_prev
+
+    if k_prev is None:
+        k_probe = min(mn, max(8, (mn + 3) // 4))
+    else:
+        k_probe = min(mn, k_prev + margin)
+
+    for _ in range(_SVDS_ENERGY_PROBE_CAP):
+        if k_probe >= mn:
+            u, singular_values, vh = scipy.linalg.svd(a, full_matrices=False)
+            k = int(strat.get_k(singular_values))
+            max_rank = min(m, n, len(singular_values))
+            rank = min(k, max_rank)
+            state.energy_k_prev = int(k)
+            return (
+                u[:, :rank],
+                singular_values[:rank].copy(),
+                vh[:rank, :],
+            )
+
+        u, sv, vh = svds(a, k=k_probe, which="LM")
+        u, sv, vh = _sort_usvh_descending(u, sv, vh)
+        top_e = float(np.sum(sv * sv))
+        if top_e + _energy_frobenius_tol(fro_sq) < thr * fro_sq:
+            k_probe = min(mn, max(k_probe + margin, int(k_probe * 1.5) + 1))
+            continue
+
+        k_need = _smallest_k_for_threshold_energy(sv, thr, fro_sq)
+        if k_need is None:
+            k_probe = min(mn, k_probe + margin)
+            continue
+        rank = min(k_need, len(sv), mn)
+        state.energy_k_prev = int(k_need)
+        return u[:, :rank], sv[:rank].copy(), vh[:rank, :]
+
+    u, singular_values, vh = scipy.linalg.svd(a, full_matrices=False)
+    k = int(strat.get_k(singular_values))
+    max_rank = min(m, n, len(singular_values))
+    rank = min(k, max_rank)
+    state.energy_k_prev = int(k)
+    return u[:, :rank], singular_values[:rank].copy(), vh[:rank, :]
+
+
 def _w_corr_keep_indices(
     u: NDArray[np.float64],
     s: NDArray[np.float64],
@@ -67,22 +173,19 @@ def _w_corr_keep_indices(
     window_length: int,
     w_corr_threshold: float,
 ) -> NDArray[np.intp]:
-    """Indices of components to keep (signal PC0 + those with W[i,0] >= threshold)."""
     k = int(s.shape[0])
     if k <= 1:
         return np.arange(k, dtype=np.intp)
-    rows: list[NDArray[np.float64]] = []
-    for i in range(k):
-        rank1: FloatArray = (u[:, i : i + 1] * s[i]) @ vh[i : i + 1, :]
-        one_d = DDiagonalStage.fast_diagonal_average(rank1)
-        rows.append(one_d)
-    components_1d = np.row_stack(rows)
+    # (k, m, n): rank-1 tensors via broadcasting (equivalent to einsum mi,i,in->imn).
+    rank1_batch = u.T[:, :, np.newaxis] * (s[:, np.newaxis] * vh)[:, np.newaxis, :]
+    components_1d = batched_diagonal_average(rank1_batch)
     w_mat = compute_w_correlation_matrix(components_1d, window_length)
-    valid: list[int] = [0]
-    for i in range(1, k):
-        if float(w_mat[i, 0]) >= w_corr_threshold:
-            valid.append(i)
-    return np.asarray(valid, dtype=np.intp)
+    rest = w_mat[1:, 0] >= w_corr_threshold
+    idx_gt0 = np.flatnonzero(rest) + 1
+    valid = np.empty(1 + idx_gt0.size, dtype=np.intp)
+    valid[0] = 0
+    valid[1:] = idx_gt0.astype(np.intp, copy=False)
+    return valid
 
 
 def _zero_s_except_indices(
@@ -97,43 +200,43 @@ def _zero_s_except_indices(
     return out
 
 
-class CSVDStage(MSSAStage[FloatArray, FloatArray]):
-    """SVD decomposition and truncation stage for MSSA.
+def _prepare_svd_frame(
+    data: FloatArray,
+    w_corr_threshold: float | None,
+    window_length: int | None,
+) -> tuple[NDArray[np.float64], int | None]:
+    """Validate frame shape and optional W-correlation window.
 
-    Fixed rank: ``svds`` + full-SVD fallback, optional one-shot W-correlation filtering.
-    Energy threshold: full ``scipy.linalg.svd`` once, then truncate by energy.
-
-    **W-correlation (optional):** ``w_corr_threshold`` must lie in ``[0.0, 1.0]`` (CLI /
-    ``MSSAPurifierBuilder`` enforce this). After building the per-component 1D series,
-    :func:`compute_w_correlation_matrix` yields ``W`` with entries in ``[0, 1]``. A
-    component ``i>0`` is kept iff ``W[i, 0] >= threshold`` (component 0 is always
-    retained as the reference). Higher thresholds drop more components.
-
-    With W-correlation enabled, **energy** mode runs full ``_w_corr_keep_indices`` only
-    on the **first** ``execute``; later frames reuse frozen ordinal indices intersected
-    with ``range(k_curr)`` (PC0 enforced when ``k_curr>=1``). Fixed-rank mode still
-    recomputes when ``k`` changes (typically never).
+    Returns ``(a, corr_wl)`` where ``corr_wl`` is set iff W-correlation is on.
     """
+    a = np.asarray(data, dtype=np.float64, order="C")
+    m, n = int(a.shape[0]), int(a.shape[1])
+    mn = min(m, n)
+    if mn == 0:
+        raise ValueError("SVD requires a non-empty matrix.")
+    corr_wl: int | None = None
+    if w_corr_threshold is not None:
+        if window_length is None:
+            raise ValueError(
+                "window_length must be a positive int when w_corr_threshold is set.",
+            )
+        corr_wl = int(window_length)
+        if corr_wl <= 0:
+            raise ValueError(
+                "window_length must be a positive int when w_corr_threshold is set.",
+            )
+    return a, corr_wl
 
-    def __init__(
-        self,
-        truncation_strategy: TruncationStrategy,
-        *,
-        w_corr_threshold: float | None = None,
-        window_length: int | None = None,
-    ) -> None:
-        self.truncation_strategy = truncation_strategy
-        validate_w_corr_threshold(w_corr_threshold)
-        self.w_corr_threshold = w_corr_threshold
-        self.window_length = window_length
-        self._cached_valid_indices: NDArray[np.intp] | None = None
-        self._cached_k: int | None = None
-        # Energy + W-corr: calibrate once on first execute; reuse ordinal indices.
-        self._energy_w_corr_frozen: bool = False
-        self._frozen_w_corr_keep_indices: NDArray[np.intp] | None = None
 
-    def _filter_s_w_corr_oneshot(
-        self,
+def _make_svd_step_fixed_rank(
+    strat: FixedRankStrategy,
+    *,
+    w_corr_threshold: float | None,
+    window_length: int | None,
+) -> Callable[[FloatArray], FloatArray]:
+    state = _SvdStepState()
+
+    def _filter_w_corr(
         u: NDArray[np.float64],
         s: NDArray[np.float64],
         vh: NDArray[np.float64],
@@ -141,121 +244,146 @@ class CSVDStage(MSSAStage[FloatArray, FloatArray]):
         thr: float,
     ) -> NDArray[np.float64]:
         k = int(s.shape[0])
-        # Energy mode: never re-run _w_corr_keep_indices after the first frame.
-        if isinstance(self.truncation_strategy, EnergyThresholdStrategy):
-            if not self._energy_w_corr_frozen:
-                self._frozen_w_corr_keep_indices = _w_corr_keep_indices(
-                    u, s, vh, corr_wl, thr
-                )
-                self._energy_w_corr_frozen = True
-            assert self._frozen_w_corr_keep_indices is not None
-            frozen = self._frozen_w_corr_keep_indices
-            keep = frozen[frozen < k].astype(np.intp, copy=False)
-            if k >= 1:
-                if keep.size == 0:
-                    keep = np.array([0], dtype=np.intp)
-                elif not np.any(keep == 0):
-                    keep = np.sort(
-                        np.unique(
-                            np.concatenate(
-                                (np.array([0], dtype=np.intp), keep),
-                            ),
-                        ),
-                    )
-                    keep = keep[keep < k]
-            return _zero_s_except_indices(s, keep)
+        cached_vi = state.cached_valid_indices
+        cached_k_rank = state.cached_k
+        if cached_vi is None or cached_k_rank is None or cached_k_rank != k:
+            state.cached_valid_indices = _w_corr_keep_indices(u, s, vh, corr_wl, thr)
+            state.cached_k = k
+        keep = state.cached_valid_indices
+        if keep is None:
+            raise RuntimeError("W-correlation cache not populated after refresh.")
+        return _zero_s_except_indices(s, keep)
 
-        # Fixed rank: recompute when k changes (rare); same k uses cache.
-        if (
-            self._cached_valid_indices is None
-            or self._cached_k is None
-            or self._cached_k != k
-        ):
-            self._cached_valid_indices = _w_corr_keep_indices(u, s, vh, corr_wl, thr)
-            self._cached_k = k
-        assert self._cached_valid_indices is not None
-        return _zero_s_except_indices(s, self._cached_valid_indices)
-
-    def execute(self, data: FloatArray) -> FloatArray:
-        """Perform SVD on the block matrix and truncate noise components."""
-        a = np.asarray(data, dtype=np.float64, order="C")
-        m, n = int(a.shape[0]), int(a.shape[1])
-        mn = min(m, n)
-        if mn == 0:
-            raise ValueError("SVD requires a non-empty matrix.")
-
-        corr_wl: int | None = None
-        if self.w_corr_threshold is not None:
-            if self.window_length is None:
-                raise ValueError(
-                    "window_length must be a positive int when "
-                    "w_corr_threshold is set.",
-                )
-            corr_wl = int(self.window_length)
-            if corr_wl <= 0:
-                raise ValueError(
-                    "window_length must be a positive int when "
-                    "w_corr_threshold is set.",
-                )
-
-        if isinstance(self.truncation_strategy, FixedRankStrategy):
-            k_req = int(self.truncation_strategy.k)
-            if k_req <= 0:
-                raise ValueError("Truncation rank must be positive.")
-            u, s, vh = _fixed_rank_truncated_factors(a, k_req)
-            if self.w_corr_threshold is not None:
-                assert corr_wl is not None
-                s = self._filter_s_w_corr_oneshot(
-                    u,
-                    s,
-                    vh,
-                    corr_wl,
-                    float(self.w_corr_threshold),
-                )
-            reconstructed: FloatArray = _reconstruct_usvh(u, s, vh)
-            return reconstructed.astype(np.float64, copy=False)
-
-        u, singular_values, vh = scipy.linalg.svd(a, full_matrices=False)
-        k = int(self.truncation_strategy.get_k(singular_values))
-        if k <= 0:
+    def svd_step(data: FloatArray) -> FloatArray:
+        a, corr_wl = _prepare_svd_frame(data, w_corr_threshold, window_length)
+        k_req = int(strat.k)
+        if k_req <= 0:
             raise ValueError("Truncation rank must be positive.")
-        max_rank = min(int(a.shape[0]), int(a.shape[1]), len(singular_values))
-        rank = min(k, max_rank)
-        u = u[:, :rank]
-        s = singular_values[:rank].copy()
-        vh = vh[:rank, :]
-        if self.w_corr_threshold is not None:
-            assert corr_wl is not None
-            s = self._filter_s_w_corr_oneshot(
+        u, s, vh = _fixed_rank_truncated_factors(a, k_req)
+        if w_corr_threshold is not None:
+            if corr_wl is None:
+                raise ValueError(
+                    "window_length must be a positive int when "
+                    "w_corr_threshold is set.",
+                )
+            s = _filter_w_corr(
                 u,
                 s,
                 vh,
                 corr_wl,
-                float(self.w_corr_threshold),
+                float(w_corr_threshold),
+            )
+        reconstructed: FloatArray = _reconstruct_usvh(u, s, vh)
+        return reconstructed.astype(np.float64, copy=False)
+
+    return svd_step
+
+
+def _make_svd_step_energy(
+    strat: EnergyThresholdStrategy,
+    *,
+    w_corr_threshold: float | None,
+    window_length: int | None,
+) -> Callable[[FloatArray], FloatArray]:
+    state = _SvdStepState()
+
+    def _filter_w_corr(
+        u: NDArray[np.float64],
+        s: NDArray[np.float64],
+        vh: NDArray[np.float64],
+        corr_wl: int,
+        thr: float,
+    ) -> NDArray[np.float64]:
+        k = int(s.shape[0])
+        if not state.energy_w_corr_frozen:
+            state.frozen_w_corr_keep_indices = _w_corr_keep_indices(
+                u, s, vh, corr_wl, thr
+            )
+            state.energy_w_corr_frozen = True
+        frozen = state.frozen_w_corr_keep_indices
+        if not isinstance(frozen, np.ndarray):
+            raise TypeError(
+                "W-correlation frozen indices must be a numpy.ndarray; "
+                f"got {type(frozen).__name__}.",
+            )
+        keep = frozen[frozen < k].astype(np.intp, copy=False)
+        if k >= 1:
+            if keep.size == 0:
+                keep = np.array([0], dtype=np.intp)
+            elif not np.any(keep == 0):
+                keep = np.sort(
+                    np.unique(
+                        np.concatenate(
+                            (np.array([0], dtype=np.intp), keep),
+                        ),
+                    ),
+                )
+                keep = keep[keep < k]
+        return _zero_s_except_indices(s, keep)
+
+    def svd_step(data: FloatArray) -> FloatArray:
+        a, corr_wl = _prepare_svd_frame(data, w_corr_threshold, window_length)
+        u, s, vh = _energy_truncated_factors(a, strat, state)
+        if w_corr_threshold is not None:
+            if corr_wl is None:
+                raise ValueError(
+                    "window_length must be a positive int when "
+                    "w_corr_threshold is set.",
+                )
+            s = _filter_w_corr(
+                u,
+                s,
+                vh,
+                corr_wl,
+                float(w_corr_threshold),
             )
         reconstructed = _reconstruct_usvh(u, s, vh)
         return reconstructed.astype(np.float64, copy=False)
 
+    return svd_step
 
-class TruncatedSVDStage(CSVDStage):
-    """Fixed-rank convenience: same as ``CSVDStage(FixedRankStrategy(k))``.
 
-    Pass a single ``k`` instead of ``FixedRankStrategy``. Optional
-    ``w_corr_threshold`` / ``window_length`` match ``CSVDStage`` (one-shot W-correlation
-    cache on repeated same-rank frames).
+def make_svd_step(
+    truncation_strategy: TruncationStrategy,
+    *,
+    w_corr_threshold: float | None = None,
+    window_length: int | None = None,
+) -> Callable[[FloatArray], FloatArray]:
+    """Return a stateful SVD+truncate callable (one per OLA / preview run).
+
+    Dispatches on the concrete strategy type once at construction; the returned
+    ``svd_step`` does not branch on ``isinstance`` per frame.
     """
-
-    def __init__(
-        self,
-        truncation_rank: int,
-        *,
-        w_corr_threshold: float | None = None,
-        window_length: int | None = None,
-    ) -> None:
-        if truncation_rank <= 0:
-            raise ValueError("Truncation rank must be positive.")
-        super().__init__(
-            FixedRankStrategy(truncation_rank),
+    validate_w_corr_threshold(w_corr_threshold)
+    if isinstance(truncation_strategy, FixedRankStrategy):
+        return _make_svd_step_fixed_rank(
+            truncation_strategy,
             w_corr_threshold=w_corr_threshold,
             window_length=window_length,
         )
+    if isinstance(truncation_strategy, EnergyThresholdStrategy):
+        return _make_svd_step_energy(
+            truncation_strategy,
+            w_corr_threshold=w_corr_threshold,
+            window_length=window_length,
+        )
+    raise TypeError(
+        "truncation_strategy must be FixedRankStrategy or EnergyThresholdStrategy, "
+        f"got {type(truncation_strategy).__name__!r}",
+    )
+
+
+def make_fixed_rank_svd_step(
+    truncation_rank: int,
+    *,
+    w_corr_threshold: float | None = None,
+    window_length: int | None = None,
+) -> Callable[[FloatArray], FloatArray]:
+    """Fixed-rank SVD step (same as ``make_svd_step(FixedRankStrategy(k), ...)``)."""
+    if truncation_rank <= 0:
+        raise ValueError("Truncation rank must be positive.")
+    return _make_svd_step_fixed_rank(
+        FixedRankStrategy(truncation_rank),
+        w_corr_threshold=w_corr_threshold,
+        window_length=window_length,
+    )

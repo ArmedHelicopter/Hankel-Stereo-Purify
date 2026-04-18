@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 # Repo root on path for ``from src...`` (same as CI / README).
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -235,22 +236,21 @@ def _run_eda_denoise(
     max_mem_mb: int,
 ) -> NDArray[np.float64]:
     """In-process denoise for **preview segment only** (small arrays)."""
-    from src.facade.purifier import MSSAPurifierBuilder
+    from src.facade.purifier import AudioPurifier
 
-    b = (
-        MSSAPurifierBuilder()
-        .set_window_length(window_length)
-        .set_max_working_memory_bytes(max_mem_mb * 1024 * 1024)
+    kw: dict[str, Any] = dict(
+        window_length=window_length,
+        max_working_memory_bytes=max_mem_mb * 1024 * 1024,
     )
     if use_energy:
-        b = b.set_energy_fraction(float(rank_or_energy))
+        kw["energy_fraction"] = float(rank_or_energy)
     else:
-        b = b.set_truncation_rank(int(rank_or_energy))
+        kw["truncation_rank"] = int(rank_or_energy)
     if frame_size is not None:
-        b = b.set_frame_size(frame_size)
+        kw["frame_size"] = frame_size
     if hop_size is not None:
-        b = b.set_hop_size(hop_size)
-    purifier = b.build()
+        kw["hop_size"] = hop_size
+    purifier = AudioPurifier(**kw)
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t_in:
         in_path = Path(t_in.name)
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t_out:

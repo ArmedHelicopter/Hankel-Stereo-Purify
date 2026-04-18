@@ -1,5 +1,5 @@
-"""Facade package exposing high-level audio purification APIs."""
+"""Public facade: stereo denoising API."""
 
-from .purifier import AudioPurifier, MSSAPurifierBuilder
+from .purifier import AudioPurifier
 
-__all__ = ["AudioPurifier", "MSSAPurifierBuilder"]
+__all__ = ["AudioPurifier"]

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from src.facade.purifier import MSSAPurifierBuilder
+from src.facade.purifier import AudioPurifier
 
 
 def test_process_file_energy_fraction_ola_short_stereo(tmp_path: Path) -> None:
@@ -17,14 +17,12 @@ def test_process_file_energy_fraction_ola_short_stereo(tmp_path: Path) -> None:
     n = 2000
     stereo = (0.02 * rng.standard_normal((n, 2))).astype(np.float64)
     sf.write(inp, stereo, 48_000, format="FLAC", subtype="PCM_24")
-    purifier = (
-        MSSAPurifierBuilder()
-        .set_window_length(32)
-        .set_energy_fraction(0.95)
-        .set_frame_size(128)
-        .set_hop_size(64)
-        .set_max_working_memory_bytes(50 * 1024 * 1024)
-        .build()
+    purifier = AudioPurifier(
+        32,
+        energy_fraction=0.95,
+        frame_size=128,
+        hop_size=64,
+        max_working_memory_bytes=50 * 1024 * 1024,
     )
     purifier.process_file(str(inp), str(out))
     assert out.is_file()

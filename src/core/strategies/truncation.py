@@ -1,29 +1,19 @@
-from abc import ABC, abstractmethod
-from typing import Any
+from __future__ import annotations
+
+from typing import TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
 
 
-class TruncationStrategy(ABC):
-    """Interface for selecting the MSSA truncation rank."""
-
-    @abstractmethod
-    def get_k(self, singular_values: Any) -> int:
-        raise NotImplementedError
-
-
-class FixedRankStrategy(TruncationStrategy):
-    """Fixed-rank truncation strategy."""
+class FixedRankStrategy:
+    """Fixed-rank truncation: use attribute ``k``; no spectrum-based selection."""
 
     def __init__(self, k: int) -> None:
         self.k = k
 
-    def get_k(self, singular_values: Any) -> int:
-        return self.k
 
-
-class EnergyThresholdStrategy(TruncationStrategy):
+class EnergyThresholdStrategy:
     """Smallest k whose cumulative singular-value energy reaches the threshold."""
 
     def __init__(self, energy_fraction: float) -> None:
@@ -31,7 +21,7 @@ class EnergyThresholdStrategy(TruncationStrategy):
             raise ValueError("energy_fraction must be in (0, 1].")
         self.threshold = energy_fraction
 
-    def get_k(self, singular_values: Any) -> int:
+    def get_k(self, singular_values: NDArray[np.float64]) -> int:
         s = np.asarray(singular_values, dtype=np.float64).ravel()
         n = int(s.size)
         if n == 0:
@@ -44,3 +34,8 @@ class EnergyThresholdStrategy(TruncationStrategy):
         cum = np.cumsum(e)
         idx = int(np.searchsorted(cum, target, side="left"))
         return max(1, min(idx + 1, n))
+
+
+# Union of the two supported configs; ``make_svd_step`` dispatches once at
+# construction time (not per frame). Kept as a type alias, not an ABC.
+TruncationStrategy: TypeAlias = FixedRankStrategy | EnergyThresholdStrategy

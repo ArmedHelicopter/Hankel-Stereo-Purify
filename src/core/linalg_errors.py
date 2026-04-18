@@ -1,21 +1,23 @@
-"""Exception types mapped to MSSA ``ProcessingError`` for linear-algebra failures."""
+"""Explicit LinAlg / ARPACK exception tuples for MSSA (no string-based dispatch)."""
 
 from __future__ import annotations
 
 import numpy as np
+import scipy.linalg  # type: ignore[import-untyped]
+from scipy.sparse.linalg import (  # type: ignore[import-untyped]
+    ArpackError,
+    ArpackNoConvergence,
+)
 
-# NumPy / SciPy share ``LinAlgError`` in typical builds; ARPACK adds its own types.
-_types: list[type[BaseException]] = [np.linalg.LinAlgError]
-try:
-    from scipy.sparse.linalg import (  # type: ignore[import-untyped]
-        ArpackError,
-        ArpackNoConvergence,
-    )
+_lin = (np.linalg.LinAlgError, scipy.linalg.LinAlgError)
+MSSA_LINALG_ERRORS: tuple[type[BaseException], ...] = tuple(dict.fromkeys(_lin))
 
-    for _t in (ArpackError, ArpackNoConvergence):
-        if _t not in _types:
-            _types.append(_t)
-except ImportError:
-    pass
+MSSA_ARPACK_ERRORS: tuple[type[BaseException], ...] = (
+    ArpackError,
+    ArpackNoConvergence,
+)
 
-MSSA_LINALG_ERRORS: tuple[type[BaseException], ...] = tuple(_types)
+# LinAlg + sparse ARPACK (svds); used by facade numeric mapping
+MSSA_NUMERIC_STEP_ERRORS: tuple[type[BaseException], ...] = (
+    MSSA_LINALG_ERRORS + MSSA_ARPACK_ERRORS
+)

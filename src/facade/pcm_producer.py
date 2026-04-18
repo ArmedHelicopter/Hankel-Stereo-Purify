@@ -1,4 +1,7 @@
-"""PCM producer thread: bounded queue + poison pill for ``AudioPurifier`` streaming."""
+"""PCM producer thread: bounded queue + poison pill for streaming OLA.
+
+Used by ``SoundfileOlaEngine`` / ``AudioPurifier``.
+"""
 
 from __future__ import annotations
 
@@ -32,7 +35,7 @@ def producer_fill_queue(
     """生产者线程：顺序读取 PCM 块并入队；结束时投入毒丸 ``None``。
 
     **并发契约**：仅本线程向 ``producer_error`` 追加异常；主线程只在从队列取到
-    毒丸之后读取该列表（见 ``AudioPurifier._append_pcm_until`` /
+    毒丸之后读取该列表（见 ``SoundfileOlaEngine._append_pcm_until`` /
     ``_raise_if_producer_failed``）。
 
     毒丸机制：无论正常结束还是 ``AudioIOError``，均在 ``finally`` 中投入且仅投入一次
@@ -42,7 +45,7 @@ def producer_fill_queue(
     ``put`` 前检查该事件，且 ``put`` 使用超时以便在队列满时仍能轮询中止。
 
     **与消费者的契约：** 主线程在异常或正常结束路径上必须调用
-    ``AudioPurifier._shutdown_pcm_producer``（置位 ``abort_event``、排空队列、
+    ``SoundfileOlaEngine._shutdown_pcm_producer``（置位 ``abort_event``、排空队列、
     ``join`` 生产者）。否则队列可能长期满载，毒丸 ``None`` 无法入队，生产者
     会在 ``finally`` 中阻塞重试；daemon 线程不会永久卡住进程退出，但会造成
     资源释放延迟。

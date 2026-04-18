@@ -20,7 +20,7 @@
 | 数据平面 CLI、立体声 PCM（多格式 I/O）、OLA、固定秩或能量阈值截断 | **本仓库 MVP** |
 | Streamlit/EDA 前端（PRD F-05） | **可选**（见下文「可选前端」；异步生产者-消费者流水线仍属二期其他项） |
 
-**W-correlation**：（1）**离线**：[`src/core/strategies/grouping.py`](src/core/strategies/grouping.py) 的 `compute_w_correlation_matrix` 可对分量矩阵做分组评估。（2）**管线内**：[`src/core/stages/c_svd.py`](src/core/stages/c_svd.py) 的 `CSVDStage` 支持 `w_corr_threshold` 与 `window_length`（`L`）。**CLI** 可选 `--w-corr-threshold`（与 `-L` 配合）；**未传该参数时**行为与旧版一致（不做 W 过滤）。`MSSAPurifierBuilder.set_w_corr_threshold(...)` 供库用户使用。
+**W-correlation**：（1）**离线**：[`src/core/strategies/grouping.py`](src/core/strategies/grouping.py) 的 `compute_w_correlation_matrix` 可对分量矩阵做分组评估。（2）**管线内**：[`src/core/stages/c_svd.py`](src/core/stages/c_svd.py) 中 `make_svd_step` 支持 `w_corr_threshold` 与 `window_length`（`L`）。**CLI** 可选 `--w-corr-threshold`（与 `-L` 配合）；**未传该参数时**行为与旧版一致（不做 W 过滤）。库用户可在构造 [`AudioPurifier`](src/facade/purifier.py) 时传入 `w_corr_threshold`。
 
 运行时依赖见 [`requirements.txt`](requirements.txt)（核心栈仅 `numpy` / `scipy` / `soundfile` / `tqdm` / `colorlog`；**未**将 `matplotlib`、`librosa` 纳入核心安装，以减小体积。可选 Streamlit 前端见 [`requirements-frontend.txt`](requirements-frontend.txt)）。
 
@@ -83,7 +83,9 @@ Hankel-Stereo-Purify/                  项目根目录
 │   ├── core/
 │   │   ├── exceptions.py
 │   │   ├── linalg_errors.py           数值/线性代数异常类型聚合（供门面等）
-│   │   ├── pipeline.py                Pipeline 与各 MSSAStage
+│   │   ├── array_types.py             FloatArray 等 ndarray 类型别名
+│   │   ├── process_frame.py           单帧 MSSA（`process_frame`）
+│   │   ├── pipeline/                  兼容 re-export `process_frame`
 │   │   ├── stages/
 │   │   │   ├── a_hankel.py
 │   │   │   ├── b_multichannel.py
@@ -94,8 +96,8 @@ Hankel-Stereo-Purify/                  项目根目录
 │   │       ├── truncation.py
 │   │       └── windowing.py
 │   ├── facade/
-│   │   ├── purifier.py                AudioPurifier / MSSAPurifierBuilder
-│   │   ├── soundfile_ola.py           soundfile 路径下 OLA + PCM 队列（由 purifier 混入）
+│   │   ├── purifier.py                AudioPurifier、process_file
+│   │   ├── soundfile_ola.py           SoundfileOlaEngine：OLA + PCM 队列（purifier 组合）
 │   │   ├── pcm_producer.py            有界队列 + 生产者线程
 │   │   └── ola.py                     帧起点、Hanning、OLA 辅助
 │   ├── io/
@@ -201,10 +203,10 @@ PYTHONPATH=src python -m src.cli --version
 
 ### 性能与复杂度（调参直觉）
 
-- **主成本**：每个 OLA 帧在 Hankel 嵌入后需做一次 **SVD**（[`src/core/stages/c_svd.py`](src/core/stages/c_svd.py)）：**固定秩**时优先截断 `svds` 或 dense 截断 SVD；**能量阈值**时需每帧 **dense 完整谱** 以定秩。总时间大致随 **帧数**（由音频长度、`frame_size`、`hop` 决定）线性增长；减小 `hop` 会显著增加帧数与耗时。
+- **主成本**：每个 OLA 帧在 Hankel 嵌入后需做一次 **SVD 数值步骤**（[`src/core/stages/c_svd.py`](src/core/stages/c_svd.py)）：**固定秩**时优先截断 `svds` 或 dense 截断 SVD；**能量阈值**时依赖累计奇异值能量定秩——实现上通过多次 `svds` 试探（带退避上限），仅在仍不足以判定或触及上限时退化为一次 dense `scipy.linalg.svd`（最坏情况与「每帧全谱」相当）。总时间大致随 **帧数**（由音频长度、`frame_size`、`hop` 决定）线性增长；减小 `hop` 会显著增加帧数与耗时。
 - **内存**：立体声累加缓冲与可选 memmap 见 `--max-memory-mb` 与 PRD NF-01。
 - **可选计时**：设置环境变量 **`HSP_PROFILE_OLA=1`**（或 `true`/`yes`）可在日志中输出整段 `_run_processing` 的 wall time（默认关闭，无额外分支开销可忽略）。
-- **可选 `CSVDStage` 管线内 W-correlation**（`--w-corr-threshold` 或库 API）：冷路径含 rank-1 重构、对角平均与 \(k \times k\) 加权相关矩阵。**能量自适应秩**下仅在**第一帧**做一次完整 W 标定并冻结保留下标，后续帧只做交集掩码（**固定秩**下仍按秩缓存，与旧版一致）。**未传该参数时无此开销。** 若需对比开关前后的单帧耗时，可在项目根运行 `python scripts/benchmark_pipeline.py --w-corr-threshold <0..1>`（与 `--energy-fraction` / `--rank` 等组合；见脚本 `--help`）。
+- **可选 `make_svd_step` 管线内 W-correlation**（`--w-corr-threshold` 或库 API）：冷路径含 rank-1 张量重构、批量反对角平均（与秩 \(k\)、联合块形状 \(m \times n\) 成 **\(O(k \cdot m \cdot n)\)** 量级）与 **\(k \times k\)** 加权相关矩阵（另含与序列长度相关的内积）。**能量自适应秩**下仅在**第一帧**做一次完整 W 标定并冻结保留下标，后续帧只做 \(\sigma\) 掩码（**固定秩**下仍按秩缓存）。**未传该参数时无此开销。** 对比开关前后单帧耗时：`python scripts/benchmark_pipeline.py --w-corr-threshold <0..1>`；观察阶段 D 内 `batched_diagonal_average` 占比：`--diag-split`（见脚本 `--help`）。是否值得做对角内核优化，以 `--diag-split` 输出的墙时占比为准，而非凭直觉。
 
 **帧数与 SVD 次数**：每帧调用一次流水线（含一次 SVD）。令 \(N\) 为样本数、\(F=\) `frame_size`、\(H=\) `hop`，帧起点个数为 \(|\texttt{list\_frame\_starts}(N,F,H)|\)，实现见 [`src/facade/ola.py`](src/facade/ola.py)（最后一帧可能延长以覆盖尾部）。快速查询：
 
@@ -212,7 +214,7 @@ PYTHONPATH=src python -m src.cli --version
 PYTHONPATH=src python scripts/estimate_ola_frames.py <num_samples> <frame_size> <hop>
 ```
 
-**单帧 SVD 规模（上界直觉）**：设 Hankel 窗长为 \(L\)（`-L`），OLA 帧长为 \(F\)（`frame_size`），则每声道 Hankel 列数 \(K=F-L+1\)，联合块矩阵形状约为 \(L \times 2K\)。**固定秩**（`-k`）：每帧对联合矩阵做截断 SVD；在 `k < min(行,列)` 时实现优先使用 `scipy.sparse.linalg.svds`，否则一次 dense `scipy.linalg.svd` 后截断（见 `src/core/stages/c_svd.py`）。**能量阈值**（`--energy-fraction`）：每帧需要完整奇异值谱以确定秩，因此对每帧做一次 dense `scipy.linalg.svd`。dense SVD 的渐近阶常记为 \(O\bigl(\min(L,\,2K)^3\bigr)\) 量级（实现依赖 LAPACK）；总耗时还乘以 **帧数**（见上式与 `estimate_ola_frames`）。可用 `scripts/estimate_ola_frames.py --window-length <L>` 在打印帧数的同时打印 \(\min(L,2K)\) 供粗算。
+**单帧 SVD 规模（上界直觉）**：设 Hankel 窗长为 \(L\)（`-L`），OLA 帧长为 \(F\)（`frame_size`），则每声道 Hankel 列数 \(K=F-L+1\)，联合块矩阵形状约为 \(L \times 2K\)。**固定秩**（`-k`）：每帧对联合矩阵做截断 SVD；在 `k < min(行,列)` 时实现优先使用 `scipy.sparse.linalg.svds`，否则一次 dense `scipy.linalg.svd` 后截断（见 `src/core/stages/c_svd.py`）。**能量阈值**（`--energy-fraction`）：每帧需足够奇异值信息以按能量定秩；常见路径为若干次 `svds` 试探，**不一定**每帧都走到 full dense SVD（见 `_energy_truncated_factors`）。在需要 dense 全谱时，渐近阶常记为 \(O\bigl(\min(L,\,2K)^3\bigr)\) 量级（实现依赖 LAPACK）；总耗时还乘以 **帧数**（见上式与 `estimate_ola_frames`）。可用 `scripts/estimate_ola_frames.py --window-length <L>` 在打印帧数的同时打印 \(\min(L,2K)\) 供粗算。
 
 ### 环境变量（日志与诊断）
 
@@ -221,8 +223,10 @@ PYTHONPATH=src python scripts/estimate_ola_frames.py <num_samples> <frame_size> 
 | `HSP_LOG_FILE` | 若设为 `none` / `0` / `false` / `off` 或空字符串，则**不写**默认的 `logs/purify.log`，仅控制台；否则为日志文件路径（进程将在该路径创建/追加，请自行选择可信目录）。未设置时行为与旧版一致（写入 `logs/purify.log`）。若创建目录或文件失败，会自动降级为仅控制台，避免在只读工作目录下崩溃。 |
 | `HSP_PROFILE_OLA` | 设为 `1`/`true`/`yes` 时输出 OLA+MSSA 段 wall time（见上）。 |
 | `HSP_LOG_IO_TRACE` | 设为 `1`/`true`/`yes` 时，在打开元数据与块流路径上额外打一条 **INFO** 日志（默认关闭）。**不**提供 I/O 超时；若输入在慢速/卡死的网络盘上，进程仍可能长时间阻塞。 |
-| `HSP_DEBUG` | 设为 `1`/`true`/`yes` 时，CLI 对未预期异常使用 **`logger.exception`** 打印完整回溯；未设置时仅记录异常类型与简短 `repr`（避免日志刷屏）。 |
-| `HSP_MAX_SAMPLES` | 若设为**正整数**，拒绝每声道样本数大于该值的输入（与 `--max-samples` 语义相同；**未**在命令行指定 `--max-samples` 时生效）。非法非空值会在 **`MSSAPurifierBuilder().build()` / `AudioPurifier(...)` 构造阶段**抛出 `ConfigurationError`，而非等到 `process_file`。 |
+| `HSP_DEBUG` | 设为 `1`/`true`/`yes` 时：(1) 对**未**包装为 `HankelPurifyError` 的顶层异常使用 **`logger.exception`** 打印完整回溯；(2) 对 **`ProcessingError`** 额外以 INFO 打印 `ProcessingFailureCode`（若 `exc.code` 已设置）。 |
+| `HSP_MAX_SAMPLES` | 若设为**正整数**，拒绝每声道样本数大于该值的输入（与 `--max-samples` 语义相同；**未**在命令行指定 `--max-samples` 时生效）。非法非空值会在 **`AudioPurifier(...)` 构造阶段**抛出 `ConfigurationError`，而非等到 `process_file`。 |
+
+处理失败且异常为 **`ProcessingError`** 时，CLI 在首条错误日志之后还会打印 **`Origin exception type: module.QualName`**（来自 [`exception_fully_qualified_name`](src/core/exceptions.py)，与是否设置 `HSP_DEBUG` **无关**），用于区分例如 `builtins.MemoryError` 与 `numpy.linalg.LinAlgError` 等根因。
 
 ### 验收与性能记录（模板）
 
@@ -366,7 +370,7 @@ make check
 
 ### 1. 先理解模块职责
 
-- `src/core/pipeline.py`：定义 `MSSAStage` 抽象类和流水线调度器
+- `src/core/array_types.py`：`FloatArray` 等 ndarray 类型别名（无调度器）
 - `src/core/stages/a_hankel.py`：实现 Hankel 嵌入
 - `src/core/stages/b_multichannel.py`：多通道组合
 - `src/core/stages/c_svd.py`：SVD 分解与截断
