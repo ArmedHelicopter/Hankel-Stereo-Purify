@@ -85,7 +85,7 @@ Hankel-Stereo-Purify/                  项目根目录
 │   │   ├── linalg_errors.py           数值/线性代数异常类型聚合（供门面等）
 │   │   ├── array_types.py             FloatArray 等 ndarray 类型别名
 │   │   ├── process_frame.py           单帧 MSSA（`process_frame`）
-│   │   ├── pipeline/                  兼容 re-export `process_frame`
+│   │   ├── pipeline/                  无独立 `core/pipeline.py`；仅兼容 re-export `process_frame`
 │   │   ├── stages/
 │   │   │   ├── a_hankel.py
 │   │   │   ├── b_multichannel.py
