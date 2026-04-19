@@ -7,7 +7,7 @@
 | 分支 | 含义 |
 |------|------|
 | **`main`** | **Phase0**：规划骨架 + 文档；占位 CLI；**不包含**完整 MSSA 管线。 |
-| **`tutorial`** | **可交付实现**：完整 `src/`、测试、可选 Streamlit 前端与教程。 |
+| **`tutorial`** | **可交付实现**：完整 `src/`、测试与教程文档。 |
 
 ```bash
 git checkout tutorial
@@ -38,7 +38,7 @@ PYTHONPATH=src pytest tests/
 
 ## 可交付版本（`tutorial`）
 
-安装、CLI 参数、大文件流式说明、可选前端等，请在切换到 **`tutorial`** 后阅读该分支上的 README 与 `docs/`。
+安装、CLI 参数与大文件流式说明，请在切换到 **`tutorial`** 后阅读该分支上的 README 与 `docs/`。
 
 ## 仓库内其他文档
 

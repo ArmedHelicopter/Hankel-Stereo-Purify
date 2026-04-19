@@ -47,7 +47,7 @@ git log --oneline main..tutorial
 
 | 区域 | 旧 `main` | `tutorial` 增量要点 |
 |------|-----------|---------------------|
-| 顶层 | 无 `frontend/`、`.streamlit/`、`scripts/`、`tutorial/` | **Streamlit 前端**、**脚本**（基准与辅助）、**教程 Markdown** |
+| 顶层 | 无 `frontend/`、`.streamlit/`、`scripts/`、`tutorial/` 等 | 上述路径及脚本、教程文档等目录增量（目录事实以 `git diff` 为准） |
 | `src/core/` | 含早期形态 | **`process_frame` 单帧链**、`core/pipeline/` 兼容 re-export、`array_types`、`grouping`（W-correlation）等 |
 | `src/facade/` | 较简 `purifier` | **OLA 引擎**、PCM 生产者、扩展门面与错误路径 |
 | `src/io/` | 较简 | **格式白名单**、立体声读写、`io_messages`、能力探测 |
@@ -62,12 +62,11 @@ git log --oneline main..tutorial
 
 - **立体声 PCM 降噪**：MSSA 数值链，保持左右声道相位关系（与 PRD 一致）。
 - **工程约束**：流式/分帧大文件；类型注解与静态检查；测试驱动关键数值与 I/O 契约。
-- **用户入口**：命令行与（规划上可选）本地控制平面；敏感信息不入库。
+- **用户入口**：命令行与库 API；敏感信息不入库。
 
 ### 非目标
 
 - **不在 Phase0 骨架分支追求与 `tutorial` 功能对等**：当前 **`main`** 上占位 CLI **不**实现 Hankel/SVD/OLA；完整实现见 **`tutorial`**。
-- **前端**：Streamlit 等为 **可选**；核心验收以 CLI/库与测试为准（PRD F-05）。
 - **实时低延迟**：以离线/准离线批处理为主，除非单独立项。
 
 ### 与 `tutorial` 的快速对照
@@ -93,7 +92,7 @@ git log --oneline main..tutorial
 
 ```mermaid
 flowchart TB
-  cli[cli_or_frontend]
+  cli[cli]
   facade[facade_AudioPurifier_OLA]
   core[core_process_frame_stages]
   io[io_soundfile_stream]
@@ -138,7 +137,6 @@ flowchart TB
 | I/O 与格式白名单 | `src/io/audio_formats.py`；`audio_stream.py`；`stereo_soundfile.py` |
 | 异常模型 | `src/core/exceptions.py`；`linalg_errors.py` |
 | 回归与冒烟测试 | `tests/`（如 `test_process_frame.py`、`test_purifier_stream.py`、`test_c_svd.py`） |
-| 可选前端 | `frontend/app.py`；`requirements-frontend.txt` |
 | 脚本与基准 | `scripts/benchmark_pipeline.py` 等 |
 | 教程与验收表 | `tutorial/TUTORIAL_INDEX.md` 及各章 `.md` |
 

@@ -31,7 +31,7 @@
 ### 2.3 外观（Facade）与流式路径
 
 - `AudioPurifier`（`facade/purifier.py`）：`process_file`、路径与配置校验、构造单帧去噪函数；组合 `SoundfileOlaEngine`（`soundfile_ola.py`）执行整文件流式路径；必要时配合 `pcm_producer` 等有界队列。
-- CLI：`src/cli.py`。可选前端见 PRD F-05；实现位于 `frontend/`（若分支包含）。
+- CLI：`src/cli.py`。
 
 ### 2.4 与早期草案的区别（已不采用）
 
