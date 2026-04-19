@@ -42,7 +42,7 @@ PYTHONPATH=src pytest tests/
 
 ## 仓库内其他文档
 
-根目录 [`docs/`](docs/) 保留 PRD、软件设计等产品文档（面向**完整系统**）；分支与 Phase0 说明以 **[`docs/PHASE0_BRANCH_GUIDE.md`](docs/PHASE0_BRANCH_GUIDE.md)** 为准。
+根目录 [`docs/`](docs/) 保留 PRD、软件设计等产品文档（面向**完整系统**）；分支与 Phase0 说明以 **[`docs/PHASE0_BRANCH_GUIDE.md`](docs/PHASE0_BRANCH_GUIDE.md)** 为准。对 **`tutorial`** 做代码审计时可按 **[`docs/TUTORIAL_CODE_AUDIT_CHECKLIST.md`](docs/TUTORIAL_CODE_AUDIT_CHECKLIST.md)** 逐项勾选。
 
 ## 许可与引用
 
