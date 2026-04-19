@@ -62,6 +62,8 @@ wheels/
 # IDE & Editor
 .vscode/
 .idea/
+.cursorrules
+.cursor/
 *.swp
 *.swo
 *~
@@ -80,3 +82,5 @@ wheels/
 
 # OS Files
 Thumbs.db
+# Windows / WSL: NTFS Zone.Identifier alternate stream sidecar
+*Zone.Identifier
