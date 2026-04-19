@@ -13,7 +13,7 @@
 git checkout tutorial
 ```
 
-设计与分支差异见 **[`docs/phase0/README.md`](docs/phase0/README.md)** 与 **[`docs/phase0/COMPARISON_main_vs_tutorial.md`](docs/phase0/COMPARISON_main_vs_tutorial.md)**。
+分支策略、`main` 与 `tutorial` 对照及 Phase0 路径映射见 **[`docs/PHASE0_BRANCH_GUIDE.md`](docs/PHASE0_BRANCH_GUIDE.md)**。
 
 ## Phase0（`main`）快速开始
 
@@ -42,7 +42,7 @@ PYTHONPATH=src pytest tests/
 
 ## 仓库内其他文档
 
-根目录 [`docs/`](docs/) 保留 PRD、软件设计等产品文档（面向**完整系统**）；在 **`main`** 上请以 **[`docs/phase0/`](docs/phase0/)** 为 Phase0 与分支策略的权威说明。
+根目录 [`docs/`](docs/) 保留 PRD、软件设计等产品文档（面向**完整系统**）；分支与 Phase0 说明以 **[`docs/PHASE0_BRANCH_GUIDE.md`](docs/PHASE0_BRANCH_GUIDE.md)** 为准。
 
 ## 许可与引用
 

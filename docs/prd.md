@@ -1,5 +1,7 @@
 # 需求规格说明书 (PRD): Hankel-Stereo-Purify
 
+> **适用性**：下列数学目标、功能编号与非功能需求描述**产品应达到的行为**。**工程实现与目录结构以 `tutorial` 分支为准**；当前 **`main`** 为 Phase0 骨架。分支与路径映射见 [`PHASE0_BRANCH_GUIDE.md`](PHASE0_BRANCH_GUIDE.md)。
+
 ## 1. 项目概述 (Project Overview)
 本项目旨在开发一套基于多通道奇异谱分析 (MSSA) 的高保真音频降噪系统。针对 1950 年代早期模拟双声道录音（特定输入源：Jascha Heifetz, RCA "Living Stereo" FLAC 文件），系统需在滤除宽带高斯类底噪（Tape Hiss）的同时，严格保全原始音频的高频谐波结构与声道间绝对相位差。系统采用“前端参数探索 + 后端 CLI 批处理”的主从解耦架构，在保证工程验证效率的同时，严格控制物理计算与内存边界。
 

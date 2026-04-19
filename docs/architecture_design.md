@@ -1,5 +1,7 @@
 # 架构设计与底层瓶颈分析 (Architecture Design & Bottleneck Analysis)
 
+> **适用性**：下文从体系结构角度说明生产者-消费者与访存瓶颈；**具体类名与线程模型以 `tutorial` 分支为准**（如 `SoundfileOlaEngine`、`pcm_producer`）。当前 **`main`** 可能无完整实现。分支说明见 [`PHASE0_BRANCH_GUIDE.md`](PHASE0_BRANCH_GUIDE.md)。
+
 ## 1. 生产者-消费者模型 (Producer-Consumer Model) 原理
 生产者-消费者模型是并发编程中用于解决数据生成速率与数据处理速率不匹配的标准架构模式。其核心思想是通过引入共享的、线程安全的缓冲区，将数据的获取（I/O 绑定）与数据的计算（CPU 绑定）在空间与时间上解耦。
 

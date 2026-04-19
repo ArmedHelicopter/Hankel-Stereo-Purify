@@ -1,56 +1,78 @@
 # 软件设计与架构规约 (Software Design Specification)
 
+> **适用性**：下文中的数学目标与分层思路适用于完整产品。**工程实现、路径与 API 以 `tutorial` 分支为准**；当前 **`main`** 为 Phase0 骨架（无完整 MSSA 管线）。分支说明与路径映射见 [`PHASE0_BRANCH_GUIDE.md`](PHASE0_BRANCH_GUIDE.md)。
+
 ## 1. 架构原则 (Architectural Principles)
-本项目 (`Hankel-Stereo-Purify`) 的纯软件实现阶段严格遵循高内聚、低耦合的面向对象设计原则。为支持团队并行开发并规避代码冲突，核心数据流必须与具体数学算子的实现解耦。
 
-## 2. 核心设计模式矩阵 (Core Design Patterns)
+本项目在实现上强调：**可验证的数值路径**、**清晰的 I/O 边界**、**薄门面**。核心 MSSA 步骤以普通函数与可调用对象表达，避免仅为「模式」而增加与当前代码不一致的调度层。
 
-系统底层架构基于以下四种经典 GoF 设计模式构建：
+- **高内聚、低耦合**：算法留在 `src/core/stages` 与 `strategies`；流式与 OLA 在门面与 I/O 层组合。
+- **异常不吞没**：门面在映射数值或配置错误时保留 `__cause__` 链，并提供可机读异常类型字段供 CLI 分桶。
+- **敏感配置外置**：不在仓库中硬编码密钥或令牌。
 
-### 2.1 流水线模式 (Pipeline / Chain of Responsibility)
-* **应用场景：** 解耦 MSSA 算法的四个核心数学模块（A-Hankel化, B-通道拼接, C-SVD截断, D-对角重构）。
-* **规约：** * 定义统一的抽象基类 `MSSAStage`。
-  * 任何数学模块必须继承该基类并实现单一的 `execute(data)` 方法。
-  * 严禁模块之间直接互相调用。所有模块由外部的 Pipeline 调度器按顺序传入和传出张量数据。
+## 2. 当前实现要点（与 `tutorial` 代码一致）
 
-### 2.2 策略模式 (Strategy Pattern)
-* **应用场景：** 动态切换算法细节（如降维截断策略、加窗平滑函数）。
-* **规约：**
-  * 定义 `TruncationStrategy` 接口（含 `get_k()` 方法）。
-  * 派生具体策略类，如 `FixedRankStrategy`（固定秩）和 `EnergyThresholdStrategy`（能量阈值）。
-  * 核心 SVD 模块只调用策略接口，不包含具体的阈值判断 `if-else` 逻辑。
+### 2.1 单帧 MSSA 数值链（`process_frame`）
 
-### 2.3 外观模式 (Facade Pattern)
-* **应用场景：** 向前端控制台（EDA）和命令行工具（CLI）隐藏底层重叠相加（Overlap-Add）与流式读取的复杂状态机。
-* **规约：**
-  * 封装顶层类 `AudioPurifier`。
-  * 对外仅暴露极其简单的 API，例如 `process_file(input_path, output_path)`。UI 层与 CLI 层绝对不允许直接操作 `numpy` 矩阵或实例化底层的 `MSSAStage` 模块。
+单帧处理由 `process_frame`（`src/core/process_frame.py`）顺序调用：
 
-### 2.4 建造者模式 (Builder Pattern)
-* **应用场景：** 管理系统初始化时庞杂的超参数（$L, k$, 帧长，跳步）。
-* **规约：**
-  * 使用 `MSSAPurifierBuilder` 提供链式调用接口（Fluent Interface）。
-  * 确保系统实例化时的参数校验（如帧长必须大于跳步）在 Builder 内部完成，防止产生非法状态的处理器实例。
+1. `hankel_embed`（`a_hankel.py`）
+2. `combine_hankel_blocks`（`b_multichannel.py`）
+3. `make_svd_step(...)` 返回的 **可调用对象**（`c_svd.py`）
+4. `diagonal_reconstruct`（`d_diagonal.py`）
 
-## 3. 标准化工程目录映射 (Directory Structure)
+门面（如 `AudioPurifier`）通过 `functools.partial(process_frame, window_length=..., svd_step=...)` 绑定参数。**不存在**历史上草案中的抽象基类 `MSSAStage`、也不存在对多阶段动态分发的 `Pipeline.execute` 循环。兼容场景下仅通过 `src/core/pipeline/__init__.py` 对 `process_frame` 做 re-export（若该文件存在于当前分支）。
 
-基于上述模式，代码库的 `src/` 目录结构被严格限定如下。团队成员需在各自负责的子目录内独立开发：
+### 2.2 截断配置（非经典 Strategy 多态）
+
+- `FixedRankStrategy` 与 `EnergyThresholdStrategy`（`truncation.py`）为**具体配置类型**；`TruncationStrategy` 在源码中为二者的**类型别名**，**不是**必须被继承的抽象接口。
+- `make_svd_step` 在**构造可调用对象时**按具体类型分支一次；运行期每帧不在 `isinstance` 上反复派发。
+
+### 2.3 外观（Facade）与流式路径
+
+- `AudioPurifier`（`facade/purifier.py`）：`process_file`、路径与配置校验、构造单帧去噪函数；组合 `SoundfileOlaEngine`（`soundfile_ola.py`）执行整文件流式路径；必要时配合 `pcm_producer` 等有界队列。
+- CLI：`src/cli.py`。可选前端见 PRD F-05；实现位于 `frontend/`（若分支包含）。
+
+### 2.4 与早期草案的区别（已不采用）
+
+以下出现在早期设计草案中，**当前实现未采用**，仅作历史记录以免评审误读：
+
+- 统一抽象基类 `MSSAStage` + `execute(data)` + 外部 Pipeline 调度器串行传张量。
+- `MSSAPurifierBuilder` 链式建造者作为**唯一**实例化路径。
+
+超参数校验在 **`AudioPurifier(...)`** 构造时完成，与「Builder 专属校验」目标等价，但形态为构造函数而非 Fluent Builder。
+
+## 3. 标准化工程目录映射（`tutorial` 参照）
+
+完整树以 **`tutorial`** 上 `src/` 为准；典型结构如下（随演进可能微调）：
 
 ```text
 src/
-├── core/                   # 核心计算逻辑 (纯粹的数学与张量操作)
-│   ├── pipeline.py         # 流水线调度器与 MSSAStage 抽象类
-│   ├── stages/             # 流水线节点 (团队分工区域)
+├── cli.py
+├── core/
+│   ├── array_types.py
+│   ├── process_frame.py
+│   ├── pipeline/          # 可选：仅 re-export process_frame
+│   ├── stages/
 │   │   ├── a_hankel.py
 │   │   ├── b_multichannel.py
 │   │   ├── c_svd.py
 │   │   └── d_diagonal.py
-│   └── strategies/         # 策略模式实现
-│       ├── truncation.py   # 截断策略
-│       └── windowing.py    # 加窗策略
-├── io/                     # 数据流入出边界
-│   └── audio_stream.py     # 封装 soundfile 动态指针块读取
-├── facade/                 # 顶层外观接口
-│   └── purifier.py         # AudioPurifier 与 Builder 模式实现
-├── cli.py                  # 数据平面：命令行入口
-└── app.py                  # 控制平面：(可选) 前端 EDA 看板入口
+│   ├── strategies/
+│   │   ├── truncation.py
+│   │   ├── windowing.py
+│   │   └── grouping.py
+│   ├── exceptions.py
+│   └── linalg_errors.py
+├── io/
+├── facade/
+│   ├── purifier.py
+│   ├── soundfile_ola.py
+│   ├── pcm_producer.py
+│   └── ola.py
+└── utils/
+```
+
+## 4. 测试与 CI（约定）
+
+静态检查与测试配置见仓库根目录 [`pyproject.toml`](../pyproject.toml) 与 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)。**`main`** 上若仅为 Phase0 骨架，测试面可能小于 `tutorial`，以各分支实际配置为准。

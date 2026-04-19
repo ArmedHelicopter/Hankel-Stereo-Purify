@@ -1,5 +1,7 @@
 # 开发计划与协作风险管理
 
+> **适用性**：本文为历史协作与里程碑规划。**当前代码组织与接口以 `tutorial` 分支及 [`software_design.md`](software_design.md) 为准**（单帧 `process_frame` 链、无 `MSSAStage`/Pipeline 调度器）。当前 **`main`** 为 Phase0 骨架。分支说明见 [`PHASE0_BRANCH_GUIDE.md`](PHASE0_BRANCH_GUIDE.md)。
+
 ## 目标
 
 为 `Hankel-Stereo-Purify` 设定一个清晰的一月交付计划，包含三人协作分工、每周里程碑，以及冲突风险与缓解方案。
@@ -19,7 +21,7 @@
 
 - 先“做可运行 MVP”再“做抽象优化”
 - 保持高内聚、低耦合，接口契约优先
-- 以 `Pipeline`、`Strategy`、`Facade` 为主线，避免过度设计
+- 以 **单帧 `process_frame` 链**、**截断配置类型**与 **`AudioPurifier` 门面**为主线，避免过度设计（详见 [`software_design.md`](software_design.md)）
 
 ---
 
@@ -36,7 +38,7 @@
 ### 成员 B：核心 MSSA 算法
 
 职责：
-- 实现 `src/core/pipeline.py`
+- 实现 `src/core/process_frame.py` 及单帧链串联
 - 实现 `src/core/stages/a_hankel.py`
 - 实现 `src/core/stages/b_multichannel.py`
 - 实现 `src/core/stages/c_svd.py`
@@ -64,7 +66,7 @@
 任务：
 - 确认最终目录结构与模块分工
 - 完成 `AudioStream` 接口草案
-- 完成 `Pipeline` / `MSSAStage` 框架
+- 完成 `process_frame` 与四阶段 stages 的可运行串联（无独立 Pipeline 调度类）
 - 搭建 `AudioPurifier` 流程草图
 - 在小样本上验证数据流是否能通
 
@@ -139,13 +141,13 @@
 - 影响：集成时花费大量时间调整数据格式
 
 缓解：
-- 在第 1 周完成接口文档，明确 `Pipeline.execute()` 和 `read_blocks()` 数据结构
+- 在第 1 周完成接口文档，明确 `process_frame` 单帧张量契约与 `read_blocks()` 数据结构
 - 成员间用“假数据快速契约测试”验证格式
 - 采用简单的 JSON / 文本说明接口约定
 
 ### 风险 3：过度抽象影响交付速度
 
-- 原因：投入太多精力先做 `Facade`/`Builder`/`Strategy` 等设计，而非先做可运行代码
+- 原因：投入太多精力先做泛型调度层或复杂建造者，而非先做可运行单帧链
 - 影响：一月内可能无法完成核心功能
 
 缓解：
