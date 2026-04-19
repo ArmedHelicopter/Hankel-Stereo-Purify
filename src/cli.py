@@ -1,25 +1,31 @@
-"""Command line interface entrypoint for Hankel-Stereo-Purify."""
+"""Phase0 CLI placeholder. Full MSSA pipeline lives on branch ``tutorial``."""
+
+from __future__ import annotations
 
 import argparse
 
-from src.utils.logger import get_logger
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m src.cli",
+        description=(
+            "Hankel-Stereo-Purify Phase0 skeleton. "
+            "Checkout branch `tutorial` for the deliverable MSSA pipeline."
+        ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="%(prog)s 0.0.0",
+    )
+    return parser
 
 
-def main() -> None:
-    logger = get_logger(__name__)
-
-    parser = argparse.ArgumentParser(description="Hankel-Stereo-Purify CLI")
-    parser.add_argument("input_path", help="Path to input audio file")
-    parser.add_argument("output_path", help="Path to output audio file")
-    args = parser.parse_args()
-
-    try:
-        logger.info("Input path: %s", args.input_path)
-        logger.info("Output path: %s", args.output_path)
-        # TODO: wire this CLI into the facade layer
-    except Exception:
-        logger.exception("Unhandled exception in CLI")
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    parser.parse_args(argv)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

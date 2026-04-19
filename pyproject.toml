@@ -1,6 +1,8 @@
+# Tooling only. Python >= 3.10; runtime pins in requirements.txt; CI: .github/workflows/ci.yml
 [tool.ruff]
 line-length = 88
 fix = true
+extend-exclude = ["frontend"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP"]
@@ -21,6 +23,16 @@ namespace_packages = true
 module = [
     "colorlog",
     "soundfile",
-    "librosa"
+    "streamlit",
+    "matplotlib",
+    "matplotlib.pyplot",
 ]
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = [
+    "--cov=src",
+    "--cov-report=term-missing",
+    "--cov-fail-under=90",
+]
+testpaths = ["tests"]

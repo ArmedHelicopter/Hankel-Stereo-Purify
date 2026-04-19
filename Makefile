@@ -1,14 +1,17 @@
 PYTHON=python3
 
-.PHONY: format lint typecheck check
+.PHONY: format lint typecheck test check
 
 format:
-	ruff format src
+	ruff format src tests
 
 lint:
-	ruff check src
+	ruff check src tests
 
 typecheck:
-	mypy src
+	PYTHONPATH=src $(PYTHON) -m mypy src tests
 
-check: format lint typecheck
+test:
+	PYTHONPATH=src $(PYTHON) -m pytest tests/
+
+check: lint typecheck test

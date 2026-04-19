@@ -1,7 +1,2 @@
+# Phase0 skeleton: minimal runtime. Full MSSA stack pins live on branch `tutorial`.
 numpy>=1.24.0
-scipy>=1.10.0
-librosa>=0.10.0
-matplotlib>=3.7.0
-soundfile>=0.12.1
-tqdm>=4.65.0
-colorlog>=6.7.0

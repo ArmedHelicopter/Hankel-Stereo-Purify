@@ -76,6 +76,7 @@ wheels/
 *.tmp
 *.log
 .pytest_cache/
+.coverage
 
 # OS Files
 Thumbs.db
