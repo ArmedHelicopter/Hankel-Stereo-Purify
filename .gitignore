@@ -60,7 +60,8 @@ wheels/
 *.ipynb_checkpoints
 
 # IDE & Editor
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .idea/
 .cursorrules
 .cursor/

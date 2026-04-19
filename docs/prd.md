@@ -19,7 +19,10 @@
 ### 模块 B：MSSA 块矩阵组合模块 (Multichannel Block Construction)
 * **功能定义：** 建立立体声（双声道）信号的空间相干性约束。
 * **数学实现：** 分别对左声道序列 $X_{left}$ 和右声道序列 $X_{right}$ 执行模块 A，生成两个 Hankel 矩阵 $H_L$ 和 $H_R$。将其水平拼接，构造多通道块 Hankel 矩阵 $\mathbf{X}_{total}$：
-    $$\mathbf{X}_{total} = [H_L, H_R] \in \mathbb{R}^{L \times 2K}$$
+
+  ```math
+  \mathbf{X}_{total} = [H_L, H_R] \in \mathbb{R}^{L \times 2K}
+  ```
 
 ### 模块 C：SVD 正交分解与截断模块 (SVD & Subspace Truncation)
 
