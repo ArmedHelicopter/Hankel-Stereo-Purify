@@ -52,6 +52,15 @@ wheels/
 *.egg
 .ruff_cache/
 .mypy_cache/
+.dmypy.json
+
+# ============================================================================
+# Testing & coverage (pytest / pytest-cov)
+# ============================================================================
+htmlcov/
+coverage.xml
+.coverage.*
+.hypothesis/
 
 # ============================================================================
 # Jupyter Notebooks & IDE
@@ -59,9 +68,8 @@ wheels/
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
-# IDE & Editor
-.vscode/*
-!.vscode/settings.json
+# IDE & Editor（整目录不提交；个人/本机配置留在本地）
+.vscode/
 .idea/
 .cursorrules
 .cursor/
