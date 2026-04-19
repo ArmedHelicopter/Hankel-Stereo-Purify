@@ -1,11 +1,11 @@
 # ============================================================================
 # Large Dataset Isolation - Audio Files (FLAC/100MB+)
 # ============================================================================
-# Raw audio data and processed output (typically 100MB+)
-data/raw/**/*.flac
-data/raw/**/*.wav
-data/raw/**/*.mp3
-data/raw/**/*.m4a
+# Raw audio (data/raws/) and processed output (typically 100MB+)
+data/raws/**/*.flac
+data/raws/**/*.wav
+data/raws/**/*.mp3
+data/raws/**/*.m4a
 data/processed/**/*.flac
 data/processed/**/*.wav
 
@@ -17,10 +17,10 @@ data/processed/**/*.wav
 
 # Keep directory structure for documentation
 !data/
-!data/raw/
+!data/raws/
 !data/processed/
 !data/.gitkeep
-!data/raw/.gitkeep
+!data/raws/.gitkeep
 !data/processed/.gitkeep
 
 # ============================================================================

@@ -1,6 +1,6 @@
 # 需求规格说明书 (PRD): Hankel-Stereo-Purify
 
-> **适用性**：下列数学目标、功能编号与非功能需求描述**产品应达到的行为**。**工程实现与目录结构以 `tutorial` 分支为准**；当前 **`main`** 可能仅为骨架。环境与文档索引见 [`SETUP_AND_BUILD.md`](SETUP_AND_BUILD.md)、[`README.md`](README.md)。
+> **适用性**：下列数学目标、功能编号与非功能需求描述**产品应达到的行为**。**工程实现与目录结构以 `tutorial` 分支为准**；当前 **`main`** 为与设计对齐的占位布局（可执行降噪以 `tutorial` 为准）。环境与构建见[根目录 README §3 运行环境与依赖](../README.md#环境与构建)；文档索引见 [docs/README.md](README.md)。
 
 ## 1. 项目概述 (Project Overview)
 本项目旨在开发一套基于多通道奇异谱分析 (MSSA) 的高保真立体声音频降噪系统。针对典型模拟或数字立体声素材中的宽带类底噪（如磁带嘶声），系统在滤除此类噪声的同时，应保全音乐信号的高频谐波结构与左右声道间的相干性与相位关系。系统以 **CLI 批处理与库 API** 为交付主路径，严格控制物理计算与内存边界。
@@ -18,30 +18,30 @@
 
 ### 模块 B：MSSA 块矩阵组合模块 (Multichannel Block Construction)
 * **功能定义：** 建立立体声（双声道）信号的空间相干性约束。
-* **数学实现：** 分别对左声道序列 $X_{left}$ 和右声道序列 $X_{right}$ 执行模块 A，生成两个 Hankel 矩阵 $H_L$ 和 $H_R$。将其水平拼接，构造多通道块 Hankel 矩阵 $\mathbf{X}_{total}$：
+* **数学实现：** 分别对左声道序列 $X_{\mathrm{left}}$ 和右声道序列 $X_{\mathrm{right}}$ 执行模块 A，生成两个 Hankel 矩阵 $H_{L}$ 和 $H_{R}$。将其水平拼接，构造多通道块 Hankel 矩阵 $\mathbf{X}_{\mathrm{total}}$：
 
-  ```math
-  \mathbf{X}_{total} = [H_L, H_R] \in \mathbb{R}^{L \times 2K}
-  ```
+    $$
+    \mathbf{X}_{\mathrm{total}} = [H_{L}, H_{R}] \in \mathbb{R}^{L \times 2K}
+    $$
 
 ### 模块 C：SVD 正交分解与截断模块 (SVD & Subspace Truncation)
 
 * **功能定义：** 求解块 Hankel 矩阵的主成分正交基，剥离噪声子空间。
 * **数学实现：**
-    1.  对 $\mathbf{X}_{total}$ 执行奇异值分解：$\mathbf{X}_{total} = U \Sigma V^T$。
+    1.  对 $\mathbf{X}_{\mathrm{total}}$ 执行奇异值分解：$\mathbf{X}_{\mathrm{total}} = U \Sigma V^{T}$。
     2.  提取对角矩阵 $\Sigma$ 中的奇异值 $\sigma_i$，计算各分量的累计能量贡献率。
     3.  设定截断秩 $k$。保留前 $k$ 个对应于确定性主导信号（如乐器基频与谐波）的奇异值，将剩余对应于随机底噪的奇异值置零，生成截断奇异值矩阵 $\Sigma_k$。
-    4.  计算降噪后的低秩近似矩阵：$\mathbf{\hat{X}}_{total} = U \Sigma_k V^T$。
+    4.  计算降噪后的低秩近似矩阵：$\hat{\mathbf{X}}_{\mathrm{total}} = U \Sigma_k V^{T}$。
 * **输入/输出：**
-    * 输入：二维块矩阵 $\mathbf{X}_{total}$，标量 $k$。
-    * 输出：降维滤波后的低秩二维块矩阵 $\mathbf{\hat{X}}_{total}$。
+    * 输入：二维块矩阵 $\mathbf{X}_{\mathrm{total}}$，标量 $k$。
+    * 输出：降维滤波后的低秩二维块矩阵 $\hat{\mathbf{X}}_{\mathrm{total}}$。
 
 ### 模块 D：对角平均化重构模块 (Diagonal Averaging)
 * **功能定义：** 将降噪后的低秩近似块矩阵逆向映射回一维时间序列。
-* **数学实现：** 由于截断重构后的矩阵 $\mathbf{\hat{X}}_{total}$ 破坏了严格的 Hankel 结构，必须沿其反斜对角线对元素求平均值。对于子矩阵中的每一项，通过计算 $\hat{x}_n = \frac{1}{|S_n|} \sum_{(i,j) \in S_n} \hat{h}_{i,j}$ （其中 $S_n$ 为第 $n$ 条反角线上的元素坐标集合），重构出滤波后的离散序列。
+* **数学实现：** 由于截断重构后的矩阵 $\hat{\mathbf{X}}_{\mathrm{total}}$ 破坏了严格的 Hankel 结构，必须沿其反斜对角线对元素求平均值。对于子矩阵中的每一项，通过计算 $\hat{x}_n = \frac{1}{|S_n|} \sum_{(i,j) \in S_n} \hat{h}_{i,j}$ （其中 $S_n$ 为第 $n$ 条反角线上的元素坐标集合），重构出滤波后的离散序列。
 * **输入/输出：**
-    * 输入：低秩二维块矩阵 $\mathbf{\hat{X}}_{total}$。
-    * 输出：降噪后的左声道一维序列 $\hat{X}_{left}$ 与右声道一维序列 $\hat{X}_{right}$。
+    * 输入：低秩二维块矩阵 $\hat{\mathbf{X}}_{\mathrm{total}}$。
+    * 输出：降噪后的左声道一维序列 $\hat{X}_{\mathrm{left}}$ 与右声道一维序列 $\hat{X}_{\mathrm{right}}$。
 
 ## 3. 功能需求 (Functional Requirements)
 * **F-01 [I/O 管线与读取机制]:** 原生支持超大体积（≥ 300MB）FLAC 无损格式的读取。严禁在物理磁盘层面切割原文件，必须采用软件级动态文件指针偏移机制（如 `soundfile.blocks`），执行原地顺序读取，并将 PCM 数据覆盖写入定长内存缓冲区。

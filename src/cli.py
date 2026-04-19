@@ -1,4 +1,4 @@
-"""Phase0 CLI placeholder. Full MSSA pipeline lives on branch ``tutorial``."""
+"""Phase0 CLI placeholder. Full MSSA implementation lives on branch ``tutorial``."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m src.cli",
         description=(
             "Hankel-Stereo-Purify Phase0 skeleton. "
-            "Checkout branch `tutorial` for the deliverable MSSA pipeline."
+            "Checkout branch `tutorial` for the deliverable MSSA implementation."
         ),
     )
     parser.add_argument(

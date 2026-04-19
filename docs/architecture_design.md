@@ -1,6 +1,6 @@
 # 架构设计与 I/O 流式要点 (Architecture Design)
 
-> **适用性**：本文说明**生产者-消费者与访存瓶颈**；**具体类名与线程模型以 `tutorial` 分支为准**（如 `SoundfileOlaEngine`、`pcm_producer`）。当前 **`main`** 可能无完整实现。CPU/GPU 与向量化选型见 [`software_design.md`](software_design.md) §4。
+> **适用性**：本文说明**生产者-消费者与访存瓶颈**；**具体类名与线程模型以 `tutorial` 分支为准**（如 `SoundfileOlaEngine`、`pcm_producer`）。当前 **`main`** 可能无完整实现。CPU/GPU 与向量化选型见 [`software_design.md`](software_design.md) §5。
 
 ## 1. 生产者-消费者模型 (Producer-Consumer Model)
 
@@ -20,4 +20,4 @@
 
 ## 3. 异构计算（CPU / GPU）
 
-本阶段核心矩阵运算以 **CPU + LAPACK/BLAS** 为基准路径；理由包括小中块矩阵上 PCIe 往返与 kernel 开销、SVD 类算子的控制流特征，以及可复现黄金向量需求。完整论述见 [`software_design.md`](software_design.md) §4，本文不重复展开。
+本阶段核心矩阵运算以 **CPU + LAPACK/BLAS** 为基准路径；理由包括小中块矩阵上 PCIe 往返与 kernel 开销、SVD 类算子的控制流特征，以及可复现黄金向量需求。完整论述见 [`software_design.md`](software_design.md) §5，本文不重复展开。

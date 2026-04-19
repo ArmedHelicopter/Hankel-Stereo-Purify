@@ -1,6 +1,6 @@
 # 开发计划与协作风险管理
 
-> **适用性**：本文为**历史协作与里程碑规划**，非 Phase0 工程基线必读。**当前代码组织与接口以 `tutorial` 分支及 [`software_design.md`](../software_design.md) 为准**（单帧 `process_frame` 链、无 `MSSAStage`/Pipeline 调度器）。当前 **`main`** 可能仅为骨架。环境与分支见 [`SETUP_AND_BUILD.md`](../SETUP_AND_BUILD.md)、[`BRANCHES.md`](../BRANCHES.md)。
+> **适用性**：本文为**历史协作与里程碑规划**，非 Phase0 工程基线必读。**当前代码组织与接口以 `tutorial` 分支及 [`software_design.md`](../software_design.md) 为准**（单帧 `process_frame` 链、无 `MSSAStage`/Pipeline 调度器）。当前 **`main`** 为与设计对齐的占位布局。环境与构建见[根目录 README §3 运行环境与依赖](../../README.md#环境与构建)；分支见 [`BRANCHES.md`](../BRANCHES.md)。
 
 ## 目标
 

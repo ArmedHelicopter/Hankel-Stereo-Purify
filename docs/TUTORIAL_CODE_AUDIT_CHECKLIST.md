@@ -1,6 +1,6 @@
 # `tutorial` 分支全量代码审计清单
 
-> **用途**：**质量审计、发版前或 Code review** 时的核对清单；与需求/设计文档并列，**非** Phase0 文档主阅读路径。文档索引起见 [`README.md`](README.md)。
+> **用途**：**质量审计、发版前或 Code review** 时的核对清单；与需求/设计文档并列，**非** Phase0 文档主阅读路径。文档索引起见 [docs/README.md](README.md)。
 
 本文档面向 **`tutorial` 分支**（可交付实现）做**代码与运行审计**时的检查项，按模块与风险域组织。审计时请在本地 **`git checkout tutorial`** 后对照源码逐项勾选或记录结论。
 
@@ -157,7 +157,7 @@
 |------|--------|--------|
 | 13.1 | `README.md`（tutorial 上）与 CLI 参数、格式表一致 | |
 | 13.2 | `docs/software_design.md` 与 `process_frame` / 无 `MSSAStage` 叙述一致 | |
-| 13.3 | [`docs/SETUP_AND_BUILD.md`](SETUP_AND_BUILD.md) 源码树表、[`docs/BRANCHES.md`](BRANCHES.md) 与当前分支一致 | 文档变更后复查 |
+| 13.3 | [根目录 README §3 运行环境与依赖](../README.md#环境与构建) 与 [`docs/software_design.md`](software_design.md) §4、[`docs/BRANCHES.md`](BRANCHES.md) 与当前分支一致 | 文档变更后复查 |
 
 ---
 
@@ -167,7 +167,7 @@
 |------|------|
 | CLI | `src/cli.py` |
 | 门面 | `src/facade/purifier.py`, `soundfile_ola.py`, `pcm_producer.py`, `ola.py` |
-| 核心 | `src/core/process_frame.py`, `stages/*.py`, `strategies/*.py`, `pipeline/__init__.py` |
+| 核心 | `src/core/process_frame.py`, `stages/*.py`, `strategies/*.py` |
 | I/O | `src/io/audio_formats.py`, `audio_stream.py`, `stereo_soundfile.py`, … |
 | 异常 | `src/core/exceptions.py`, `linalg_errors.py` |
 | 日志 | `src/utils/logger.py` |
