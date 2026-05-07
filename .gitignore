@@ -111,3 +111,4 @@ draft_*.md
 .cline/
 agent_logs/
 *.agent.log
+Hankel-Stereo-Purify/
