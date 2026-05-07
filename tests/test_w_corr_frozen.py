@@ -322,36 +322,37 @@ def main() -> None:
     audio, sr = sf.read(str(src_file), dtype="float64")
     print(f"  sr={sr}, shape={audio.shape}, duration={audio.shape[0]/sr:.1f}s")
 
-    # Use a short slice (skip initial silence, take next 10 seconds)
+    # Use a longer slice for meaningful listening (skip initial silence)
+    target_output_seconds = 10.0
     skip_samples = int(sr * 0.5)  # Skip first 0.5s of silence
-    start_sample = min(skip_samples, audio.shape[0])
-    end_sample = min(start_sample + sr * 10, audio.shape[0])
-    audio = audio[start_sample:end_sample]
-    print(f"  Using samples {start_sample} to {end_sample} ({audio.shape[0]/sr:.1f}s)")
+    # Need enough input samples: max(F) + (num_frames-1)*min(hop) ≈ target
+    max_F = max(c[0] for c in [(512,128,128),(1024,256,256),(2048,512,512)])  # will recalc below
+    # Take a generous slice; actual frames computed per config
+    needed_samples = skip_samples + int(sr * (target_output_seconds + 2))  # +2s margin
+    end_sample = min(needed_samples, audio.shape[0])
+    audio = audio[skip_samples:end_sample]
+    print(f"  Using samples {skip_samples} to {end_sample} ({audio.shape[0]/sr:.1f}s)")
 
-    num_frames = 10
-    energy_fraction = 0.9
-    w_corr_threshold = 0.3
+    # Calculate num_frames per config to achieve ~10s output
+    target_samples = int(sr * target_output_seconds)
 
-    # Parameter grid
+    # Parameter grid - just 2 configs: one with small L (should match), one with large L (may diverge)
     grid = []
-    for F in [512, 1024, 2048]:
-        for L_ratio in [4, 3, 2]:  # L = F // ratio
-            L = F // L_ratio
-            if L < 16:
-                continue
-            for hop_ratio in [4, 2]:  # hop = F // ratio
-                hop = F // hop_ratio
-                if hop < 1:
-                    continue
-                grid.append((F, L, hop))
+    for F, L_ratio, hop_ratio in [(1024, 4, 1), (1024, 2, 1)]:
+        L = F // L_ratio
+        hop = F // hop_ratio
+        frames_needed = max(1, (target_samples - F) // hop + 1)
+        grid.append((F, L, hop, frames_needed))
 
-    print(f"\nGrid: {len(grid)} combinations, {num_frames} frames each\n")
+    print(f"\nGrid: {len(grid)} combinations, target {target_output_seconds}s output each\n")
 
     results: list[GridResult] = []
     suffix = src_file.suffix  # .mp3
 
-    for i, (F, L, hop) in enumerate(grid):
+    energy_fraction = 0.9
+    w_corr_threshold = 0.3
+
+    for i, (F, L, hop, num_frames) in enumerate(grid):
         tag = f"F{F}_L{L}_hop{hop}"
         try:
             result = run_single_config(
