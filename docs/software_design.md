@@ -31,6 +31,13 @@
 * 超参数在 **`AudioPurifier(...)`** 构造时校验（`truncation_rank` 与 `energy_fraction` 互斥等）。
 * 环境变量 `HSP_MAX_SAMPLES` 与 CLI `--max-samples` 在 **构造阶段** 解析；非法值抛出 `ConfigurationError`。
 
+### 2.5 与架构批判的对照（实现现状，非新增抽象）
+
+* **调度层：** 已移除独立的 Stage 类、`MssaFramePipeline` 与 `AudioPurifierBuilder`；单帧数学链由 [`process_frame`](../src/core/process_frame.py) 直接表达，截断与 W-correlation 逻辑在 [`c_svd.py`](../src/core/stages/c_svd.py) 的 `make_svd_step` 所返回的**可调用对象**内（[`_FixedRankSvdStep`](../src/core/stages/c_svd.py) / [`_EnergySvdStep`](../src/core/stages/c_svd.py)），状态字段见 `_SvdStepState`。
+* **反对角平均：** [`d_diagonal.py`](../src/core/stages/d_diagonal.py) 对固定 `(m,n)` 预计算 `t_flat = i+j`，用 `numpy.bincount` 聚合；仅对 batch 维（如立体声 `B=2`）做 Python 循环，**不再**为全量 scatter 分配 `O(B·mn)` 整型索引表。
+* **W-correlation / 能量路径：** 可选 W-correlation 与能量截断的算力与内存阶见 §2.2；能量模式含对同一矩阵的多次 `svds` 探测与可能的全 `svd` 回退，行为由常量帽与浮点容差约束，**非闭式一步解**。
+* **门面异常：** `process_file` 对线性代数与 ARPACK 异常显式映射；`ValueError` 映射为 `ProcessingError` 并记录 `format_exception_origin`；其余未捕获类型落入 `except Exception` 并记完整栈（`logger.exception`），对外仍为泛化文案——**属刻意粗分桶**，排障依赖日志与 `__cause__` 链。包装时使用 **`raise ProcessingError(...) from exc`**：Python 将 `exc` 置于 **`__cause__`**，标准 traceback 以「链式」展示，**并非**丢弃 SciPy/ARPACK 来源；若库调用方坚持「不包一层、直接收到 `LinAlgError`」，属不同 API 契约，当前默认不裸透传。所有经门面包装的 [`ProcessingError`](../src/core/exceptions.py) 均带可机读字段 **`origin_exception_type`**（``module.QualName``，由 [`exception_fully_qualified_name`](../src/core/exceptions.py) 生成），CLI 在失败时额外打印该行，便于区分例如 `builtins.MemoryError` 与未单独映射的数值栈类型。
+
 ### 2.6 参数选择经验（实测结论）
 
 以下基于 Beethoven 钢琴录音（44100Hz stereo MP3）的实测，非理论推导。
@@ -72,13 +79,6 @@ W-correlation 引入的问题：
 - `energy_k_prev` 用作 warm-start（`c_svd.py`），但这只是加速探测，不保证 k 恒定
 
 这本身不一定是问题——逐帧自适应 k 是能量截断的设计意图。但如果 k 波动剧烈（如在瞬态处跳变），可能引入类似 W-correlation 的调制伪影。可通过 `scripts/benchmark_pipeline.py` 观察阶段 C 的 k 值分布。
-
-### 2.5 与架构批判的对照（实现现状，非新增抽象）
-
-* **调度层：** 已移除独立的 Stage 类、`MssaFramePipeline` 与 `AudioPurifierBuilder`；单帧数学链由 [`process_frame`](../src/core/process_frame.py) 直接表达，截断与 W-correlation 逻辑在 [`c_svd.py`](../src/core/stages/c_svd.py) 的 `make_svd_step` 所返回的**可调用对象**内（[`_FixedRankSvdStep`](../src/core/stages/c_svd.py) / [`_EnergySvdStep`](../src/core/stages/c_svd.py)），状态字段见 `_SvdStepState`。
-* **反对角平均：** [`d_diagonal.py`](../src/core/stages/d_diagonal.py) 对固定 `(m,n)` 预计算 `t_flat = i+j`，用 `numpy.bincount` 聚合；仅对 batch 维（如立体声 `B=2`）做 Python 循环，**不再**为全量 scatter 分配 `O(B·mn)` 整型索引表。
-* **W-correlation / 能量路径：** 可选 W-correlation 与能量截断的算力与内存阶见 §2.2；能量模式含对同一矩阵的多次 `svds` 探测与可能的全 `svd` 回退，行为由常量帽与浮点容差约束，**非闭式一步解**。
-* **门面异常：** `process_file` 对线性代数与 ARPACK 异常显式映射；`ValueError` 映射为 `ProcessingError` 并记录 `format_exception_origin`；其余未捕获类型落入 `except Exception` 并记完整栈（`logger.exception`），对外仍为泛化文案——**属刻意粗分桶**，排障依赖日志与 `__cause__` 链。包装时使用 **`raise ProcessingError(...) from exc`**：Python 将 `exc` 置于 **`__cause__`**，标准 traceback 以「链式」展示，**并非**丢弃 SciPy/ARPACK 来源；若库调用方坚持「不包一层、直接收到 `LinAlgError`」，属不同 API 契约，当前默认不裸透传。所有经门面包装的 [`ProcessingError`](../src/core/exceptions.py) 均带可机读字段 **`origin_exception_type`**（``module.QualName``，由 [`exception_fully_qualified_name`](../src/core/exceptions.py) 生成），CLI 在失败时额外打印该行，便于区分例如 `builtins.MemoryError` 与未单独映射的数值栈类型。
 
 ## 3. 标准化工程目录映射 (Directory Structure)
 
