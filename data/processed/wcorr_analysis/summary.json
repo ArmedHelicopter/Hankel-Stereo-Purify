@@ -1,0 +1,68 @@
+{
+  "baseline": {
+    "rms": 0.006644,
+    "time_s": 24.2
+  },
+  "sweep": [
+    {
+      "threshold": 0.1,
+      "snr_vs_original": 13.4,
+      "snr_diff_energy_vs_wcorr": 32.5,
+      "rms_energy": 0.006644,
+      "rms_wcorr": 0.006639,
+      "rms_diff": 0.000158,
+      "diff_ratio_pct": 2.4,
+      "time_s": 26.3
+    },
+    {
+      "threshold": 0.2,
+      "snr_vs_original": 13.3,
+      "snr_diff_energy_vs_wcorr": 29.3,
+      "rms_energy": 0.006644,
+      "rms_wcorr": 0.006631,
+      "rms_diff": 0.000227,
+      "diff_ratio_pct": 3.4,
+      "time_s": 28.9
+    },
+    {
+      "threshold": 0.3,
+      "snr_vs_original": 13.1,
+      "snr_diff_energy_vs_wcorr": 27.7,
+      "rms_energy": 0.006644,
+      "rms_wcorr": 0.00662,
+      "rms_diff": 0.000275,
+      "diff_ratio_pct": 4.1,
+      "time_s": 27.8
+    },
+    {
+      "threshold": 0.5,
+      "snr_vs_original": 13.0,
+      "snr_diff_energy_vs_wcorr": 26.4,
+      "rms_energy": 0.006644,
+      "rms_wcorr": 0.006604,
+      "rms_diff": 0.000317,
+      "diff_ratio_pct": 4.8,
+      "time_s": 28.2
+    },
+    {
+      "threshold": 0.7,
+      "snr_vs_original": 12.9,
+      "snr_diff_energy_vs_wcorr": 26.0,
+      "rms_energy": 0.006644,
+      "rms_wcorr": 0.006599,
+      "rms_diff": 0.000334,
+      "diff_ratio_pct": 5.0,
+      "time_s": 26.7
+    },
+    {
+      "threshold": 0.9,
+      "snr_vs_original": 12.8,
+      "snr_diff_energy_vs_wcorr": 25.4,
+      "rms_energy": 0.006644,
+      "rms_wcorr": 0.006596,
+      "rms_diff": 0.000356,
+      "diff_ratio_pct": 5.4,
+      "time_s": 26.9
+    }
+  ]
+}
