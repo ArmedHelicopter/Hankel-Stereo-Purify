@@ -36,6 +36,20 @@ class EnergyThresholdStrategy:
         return max(1, min(idx + 1, n))
 
 
-# Union of the two supported configs; ``make_svd_step`` dispatches once at
-# construction time (not per frame). Kept as a type alias, not an ABC.
-TruncationStrategy: TypeAlias = FixedRankStrategy | EnergyThresholdStrategy
+class WienerStrategy:
+    """Wiener soft weighting: per-component continuous weight based on SNR estimate.
+
+    Instead of hard truncation (keep/discard), applies the Wiener gain:
+        w_i = max(0, 1 - σ_noise² / σ_i²)
+
+    Noise variance is estimated from the bottom ``noise_fraction`` of singular values.
+    """
+
+    def __init__(self, noise_fraction: float = 0.1) -> None:
+        if not 0.0 < noise_fraction < 1.0:
+            raise ValueError("noise_fraction must be in (0, 1).")
+        self.noise_fraction = noise_fraction
+
+
+# Union of supported configs; ``make_svd_step`` dispatches once at construction.
+TruncationStrategy: TypeAlias = FixedRankStrategy | EnergyThresholdStrategy | WienerStrategy

@@ -16,6 +16,7 @@ from ..strategies.grouping import compute_w_correlation_matrix
 from ..strategies.truncation import (
     EnergyThresholdStrategy,
     FixedRankStrategy,
+    WienerStrategy,
     TruncationStrategy,
 )
 from .d_diagonal import fast_diagonal_average
@@ -378,6 +379,44 @@ class _EnergySvdStep:
         return reconstructed.astype(np.float64, copy=False)
 
 
+class _WienerSvdStep:
+    """Wiener soft weighting: continuous per-component gain instead of hard truncation.
+
+    Computes full SVD, estimates noise variance from the bottom fraction of
+    singular values, then applies Wiener gain:
+        w_i = max(0, 1 - σ_noise² / σ_i²)
+    to each component before reconstruction.
+    """
+
+    __slots__ = ("_noise_fraction",)
+
+    def __init__(self, strat: WienerStrategy) -> None:
+        self._noise_fraction = strat.noise_fraction
+
+    def __call__(self, data: FloatArray) -> FloatArray:
+        a = np.asarray(data, dtype=np.float64, order="C")
+        u, s, vh = scipy.linalg.svd(a, full_matrices=False)
+        k = int(s.size)
+        if k == 0:
+            return a
+
+        # Estimate noise variance from bottom fraction of singular values
+        n_noise = max(1, int(k * self._noise_fraction))
+        noise_vals = s[-n_noise:]
+        noise_var = float(np.mean(noise_vals * noise_vals))
+
+        # Wiener gain: w_i = max(0, 1 - noise_var / σ_i²)
+        s_sq = s * s
+        with np.errstate(divide="ignore", invalid="ignore"):
+            weights = np.where(s_sq > noise_var, 1.0 - noise_var / s_sq, 0.0)
+        weights = np.clip(weights, 0.0, 1.0)
+
+        # Apply weights and reconstruct
+        weighted_s = s * weights
+        reconstructed = _reconstruct_usvh(u, weighted_s, vh)
+        return reconstructed.astype(np.float64, copy=False)
+
+
 def _make_svd_step_fixed_rank(
     strat: FixedRankStrategy,
     *,
@@ -404,6 +443,12 @@ def _make_svd_step_energy(
     )
 
 
+def _make_svd_step_wiener(
+    strat: WienerStrategy,
+) -> Callable[[FloatArray], FloatArray]:
+    return _WienerSvdStep(strat)
+
+
 def make_svd_step(
     truncation_strategy: TruncationStrategy,
     *,
@@ -428,9 +473,11 @@ def make_svd_step(
             w_corr_threshold=w_corr_threshold,
             window_length=window_length,
         )
+    if isinstance(truncation_strategy, WienerStrategy):
+        return _make_svd_step_wiener(truncation_strategy)
     raise TypeError(
-        "truncation_strategy must be FixedRankStrategy or EnergyThresholdStrategy, "
-        f"got {type(truncation_strategy).__name__!r}",
+        "truncation_strategy must be FixedRankStrategy, EnergyThresholdStrategy, "
+        f"or WienerStrategy, got {type(truncation_strategy).__name__!r}",
     )
 
 
