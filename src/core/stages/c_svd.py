@@ -16,6 +16,7 @@ from ..strategies.grouping import compute_w_correlation_matrix
 from ..strategies.truncation import (
     EnergyThresholdStrategy,
     FixedRankStrategy,
+    HeuristicStrategy,
     WienerStrategy,
     TruncationStrategy,
 )
@@ -472,6 +473,48 @@ def _make_svd_step_wiener(
     return _WienerSvdStep(strat)
 
 
+class _HeuristicSvdStep:
+    """Heuristic multi-feature weighting: combines SFM, energy, and temporal structure.
+    
+    Computes full SVD, then applies multi-feature weighting to each component.
+    """
+    
+    __slots__ = ("_strategy",)
+    
+    def __init__(self, strat: HeuristicStrategy) -> None:
+        from src.core.strategies.heuristic import HeuristicMultiFeatureStrategy
+        self._strategy = HeuristicMultiFeatureStrategy(
+            sfm_weight=strat.sfm_weight,
+            energy_weight=strat.energy_weight,
+            temporal_weight=strat.temporal_weight,
+            sfm_threshold_low=strat.sfm_threshold_low,
+            sfm_threshold_high=strat.sfm_threshold_high,
+            energy_threshold=strat.energy_threshold,
+            temporal_threshold=strat.temporal_threshold,
+        )
+    
+    def __call__(self, data: FloatArray) -> FloatArray:
+        a = np.asarray(data, dtype=np.float64, order="C")
+        u, s, vh = scipy.linalg.svd(a, full_matrices=False)
+        k = int(s.size)
+        if k == 0:
+            return a
+        
+        # Get weights from heuristic strategy
+        weights = self._strategy.get_weights(u, s, vh, a.shape[0])
+        
+        # Apply weights
+        weighted_s = s * weights
+        reconstructed = _reconstruct_usvh(u, weighted_s, vh)
+        return reconstructed.astype(np.float64, copy=False)
+
+
+def _make_svd_step_heuristic(
+    strat: HeuristicStrategy,
+) -> Callable[[FloatArray], FloatArray]:
+    return _HeuristicSvdStep(strat)
+
+
 def make_svd_step(
     truncation_strategy: TruncationStrategy,
     *,
@@ -498,9 +541,11 @@ def make_svd_step(
         )
     if isinstance(truncation_strategy, WienerStrategy):
         return _make_svd_step_wiener(truncation_strategy)
+    if isinstance(truncation_strategy, HeuristicStrategy):
+        return _make_svd_step_heuristic(truncation_strategy)
     raise TypeError(
         "truncation_strategy must be FixedRankStrategy, EnergyThresholdStrategy, "
-        f"or WienerStrategy, got {type(truncation_strategy).__name__!r}",
+        f"WienerStrategy, or HeuristicStrategy, got {type(truncation_strategy).__name__!r}",
     )
 
 

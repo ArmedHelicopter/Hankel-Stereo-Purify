@@ -192,7 +192,10 @@ class HeuristicMultiFeatureStrategy:
         # For components with very low energy, assign low weight directly
         min_energy_threshold = 0.001 * total_energy  # 0.1% of total energy
         
-        for i in range(k):
+        # Limit to top 50 components for performance
+        max_components = min(50, k)
+        
+        for i in range(max_components):
             component_energy = s[i] * s[i]
             
             # Skip expensive feature computation for low-energy components
@@ -213,6 +216,10 @@ class HeuristicMultiFeatureStrategy:
             
             # Use signal probability as weight
             weights[i] = signal_prob
+        
+        # For remaining components, assign low weight
+        for i in range(max_components, k):
+            weights[i] = 0.1
         
         return weights
     

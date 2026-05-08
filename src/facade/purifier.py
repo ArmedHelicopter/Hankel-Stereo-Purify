@@ -33,6 +33,7 @@ from src.core.stages.c_svd import make_svd_step
 from src.core.strategies.truncation import (
     EnergyThresholdStrategy,
     FixedRankStrategy,
+    HeuristicStrategy,
     WienerStrategy,
     TruncationStrategy,
 )
@@ -84,6 +85,7 @@ class AudioPurifier:
     truncation_rank: int
     energy_fraction: float | None
     wiener_noise_fraction: float | None
+    heuristic_strategy: HeuristicStrategy | None
 
     def __init__(
         self,
@@ -92,6 +94,7 @@ class AudioPurifier:
         truncation_rank: int | None = None,
         energy_fraction: float | None = None,
         wiener_noise_fraction: float | None = None,
+        heuristic_strategy: HeuristicStrategy | None = None,
         frame_size: int | None = None,
         max_working_memory_bytes: int = 1_500_000_000,
         max_input_samples: int | None = None,
@@ -99,16 +102,17 @@ class AudioPurifier:
     ) -> None:
         if not isinstance(window_length, int) or window_length <= 0:
             raise ConfigurationError("window_length must be a positive integer.")
-        modes = [v for v in (truncation_rank, energy_fraction, wiener_noise_fraction) if v is not None]
+        modes = [v for v in (truncation_rank, energy_fraction, wiener_noise_fraction, heuristic_strategy) if v is not None]
         if len(modes) == 0:
             raise ConfigurationError(
                 "Missing truncation mode: pass truncation_rank=... for fixed k, "
                 "energy_fraction=... for energy-based rank, "
-                "or wiener_noise_fraction=... for Wiener soft weighting."
+                "wiener_noise_fraction=... for Wiener soft weighting, "
+                "or heuristic_strategy=... for heuristic multi-feature weighting."
             )
         if len(modes) > 1:
             raise ConfigurationError(
-                "Use exactly one of truncation_rank, energy_fraction, wiener_noise_fraction."
+                "Use exactly one of truncation_rank, energy_fraction, wiener_noise_fraction, heuristic_strategy."
             )
         validate_w_corr_threshold(w_corr_threshold)
 
@@ -117,13 +121,16 @@ class AudioPurifier:
         self.truncation_rank = 0
         self.energy_fraction = None
         self.wiener_noise_fraction = None
+        self.heuristic_strategy = None
         if energy_fraction is not None:
             self.energy_fraction = energy_fraction
         elif truncation_rank is not None:
             self.truncation_rank = truncation_rank
-        else:
-            assert wiener_noise_fraction is not None
+        elif wiener_noise_fraction is not None:
             self.wiener_noise_fraction = wiener_noise_fraction
+        else:
+            assert heuristic_strategy is not None
+            self.heuristic_strategy = heuristic_strategy
 
         self.frame_size = (
             frame_size
@@ -246,6 +253,9 @@ class AudioPurifier:
             if not 0.0 < self.wiener_noise_fraction < 1.0:
                 raise ConfigurationError("wiener_noise_fraction must be in (0, 1).")
             return
+        if self.heuristic_strategy is not None:
+            # Heuristic strategy validation is done in its constructor
+            return
         if self.truncation_rank <= 0:
             raise ConfigurationError("Truncation rank must be a positive integer.")
         if self.truncation_rank > self.window_length:
@@ -266,6 +276,8 @@ class AudioPurifier:
             strat = EnergyThresholdStrategy(self.energy_fraction)
         elif self.wiener_noise_fraction is not None:
             strat = WienerStrategy(self.wiener_noise_fraction)
+        elif self.heuristic_strategy is not None:
+            strat = self.heuristic_strategy
         else:
             strat = FixedRankStrategy(self.truncation_rank)
         wc = self.w_corr_threshold

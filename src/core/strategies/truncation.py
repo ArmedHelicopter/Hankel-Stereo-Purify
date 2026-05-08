@@ -51,5 +51,45 @@ class WienerStrategy:
         self.noise_fraction = noise_fraction
 
 
+class HeuristicStrategy:
+    """Heuristic multi-feature weighting: combines SFM, energy, and temporal structure.
+    
+    Instead of hard truncation or Wiener weighting, uses multiple features to
+    estimate the probability that each SVD component is signal vs noise.
+    """
+    
+    def __init__(
+        self,
+        sfm_weight: float = 0.4,
+        energy_weight: float = 0.4,
+        temporal_weight: float = 0.2,
+        sfm_threshold_low: float = 0.2,
+        sfm_threshold_high: float = 0.6,
+        energy_threshold: float = 0.01,
+        temporal_threshold: float = 0.3,
+    ) -> None:
+        """Initialize heuristic strategy.
+        
+        Args:
+            sfm_weight: Weight for SFM feature in final combination
+            energy_weight: Weight for energy feature
+            temporal_weight: Weight for temporal structure feature
+            sfm_threshold_low: SFM below this is definitely signal
+            sfm_threshold_high: SFM above this is definitely noise
+            energy_threshold: Energy below this is considered noise
+            temporal_threshold: Temporal autocorrelation above this is signal
+        """
+        # Normalize weights to sum to 1
+        total = sfm_weight + energy_weight + temporal_weight
+        self.sfm_weight = sfm_weight / total
+        self.energy_weight = energy_weight / total
+        self.temporal_weight = temporal_weight / total
+        
+        self.sfm_threshold_low = sfm_threshold_low
+        self.sfm_threshold_high = sfm_threshold_high
+        self.energy_threshold = energy_threshold
+        self.temporal_threshold = temporal_threshold
+
+
 # Union of supported configs; ``make_svd_step`` dispatches once at construction.
-TruncationStrategy: TypeAlias = FixedRankStrategy | EnergyThresholdStrategy | WienerStrategy
+TruncationStrategy: TypeAlias = FixedRankStrategy | EnergyThresholdStrategy | WienerStrategy | HeuristicStrategy
