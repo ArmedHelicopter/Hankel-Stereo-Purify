@@ -414,6 +414,25 @@ class _WienerSvdStep:
         return reconstructed.astype(np.float64, copy=False)
 
 
+class _WienerSvdStepCuda:
+    """Wiener SVD via CUDA GPU acceleration. Falls back to CPU if CUDA unavailable."""
+
+    __slots__ = ("_noise_fraction", "_cuda_fn")
+
+    def __init__(self, strat: WienerStrategy) -> None:
+        self._noise_fraction = strat.noise_fraction
+        from src.cuda.wiener_cuda import wiener_svd_cuda
+        self._cuda_fn = wiener_svd_cuda
+
+    def __call__(self, data: FloatArray) -> FloatArray:
+        a = np.asarray(data, dtype=np.float64, order="C")
+        # CUDA operates on Hankel-embedded matrix (rows x cols)
+        # Input shape is (F, 2), need Hankel embed first — but process_frame
+        # calls svd_step AFTER hankel_embed + combine, so `data` is already
+        # the joint matrix (rows x cols).
+        return self._cuda_fn(a, self._noise_fraction)
+
+
 def _make_svd_step_fixed_rank(
     strat: FixedRankStrategy,
     *,
@@ -443,6 +462,13 @@ def _make_svd_step_energy(
 def _make_svd_step_wiener(
     strat: WienerStrategy,
 ) -> Callable[[FloatArray], FloatArray]:
+    # Try CUDA first, fall back to CPU
+    try:
+        from src.cuda.wiener_cuda import is_available
+        if is_available():
+            return _WienerSvdStepCuda(strat)
+    except ImportError:
+        pass
     return _WienerSvdStep(strat)
 
 
