@@ -175,9 +175,10 @@ def test_c_svd_energy_strategy_with_w_corr_runs() -> None:
     assert np.all(np.isfinite(y))
 
 
-def test_energy_w_corr_calls_w_corr_keep_indices_only_once(
+def test_energy_w_corr_calls_w_corr_keep_indices_per_frame(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """W-correlation indices are recomputed every frame (no freezing)."""
     calls: list[int] = []
     real = c_svd_module._w_corr_keep_indices
 
@@ -202,7 +203,7 @@ def test_energy_w_corr_calls_w_corr_keep_indices_only_once(
     step(rng.standard_normal((6, 10)))
     assert len(calls) == 1
     step(rng.standard_normal((6, 10)))
-    assert len(calls) == 1
+    assert len(calls) == 2
 
 
 def _reference_w_corr_keep_indices_loop(
@@ -229,7 +230,8 @@ def _reference_w_corr_keep_indices_loop(
     return np.asarray(valid, dtype=np.intp)
 
 
-def test_w_corr_keep_indices_matches_reference_loop() -> None:
+def test_w_corr_keep_indices_clustering() -> None:
+    """Clustering-based W-correlation: returns sorted indices, keeps at least 1."""
     rng = np.random.default_rng(501)
     for k in (2, 5, 8):
         m, n = 6, 9
@@ -237,10 +239,12 @@ def test_w_corr_keep_indices_matches_reference_loop() -> None:
         s = np.abs(rng.standard_normal(k))
         vh = rng.standard_normal((k, n))
         wl = 4
-        thr = 0.35
-        got = _w_corr_keep_indices(u, s, vh, wl, thr)
-        ref = _reference_w_corr_keep_indices_loop(u, s, vh, wl, thr)
-        np.testing.assert_array_equal(got, ref)
+        for thr in (0.1, 0.35, 0.7):
+            got = _w_corr_keep_indices(u, s, vh, wl, thr)
+            assert got.size >= 1, f"k={k} thr={thr}: must keep at least 1"
+            assert np.all(got >= 0) and np.all(got < k)
+            assert np.array_equal(got, np.sort(got)), "indices must be sorted"
+            assert len(got) == len(set(got.tolist())), "no duplicates"
 
 
 def test_fixed_rank_w_corr_still_one_call_when_k_constant(

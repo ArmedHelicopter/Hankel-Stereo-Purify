@@ -173,6 +173,9 @@ def _w_corr_keep_indices(
     window_length: int,
     w_corr_threshold: float,
 ) -> NDArray[np.intp]:
+    from scipy.cluster.hierarchy import fcluster, linkage
+    from scipy.spatial.distance import squareform
+
     k = int(s.shape[0])
     if k <= 1:
         return np.arange(k, dtype=np.intp)
@@ -183,12 +186,39 @@ def _w_corr_keep_indices(
         rank1 = np.outer(u[:, r], vh[r, :]) * s[r]
         components_1d[r] = fast_diagonal_average(rank1)
     w_mat = compute_w_correlation_matrix(components_1d, window_length)
-    rest = w_mat[1:, 0] >= w_corr_threshold
-    idx_gt0 = np.flatnonzero(rest) + 1
-    valid = np.empty(1 + idx_gt0.size, dtype=np.intp)
-    valid[0] = 0
-    valid[1:] = idx_gt0.astype(np.intp, copy=False)
-    return valid
+
+    # Convert similarity to distance, force diagonal to 0
+    dist_mat = 1.0 - np.abs(w_mat)
+    np.fill_diagonal(dist_mat, 0.0)
+
+    # Hierarchical clustering (average linkage)
+    condensed = squareform(dist_mat, checks=False)
+    Z = linkage(condensed, method="average")
+    labels = fcluster(Z, t=1.0 - w_corr_threshold, criterion="distance")
+
+    # Energy per cluster
+    total_energy = float(np.sum(s[:k] ** 2))
+    cluster_energy: dict[int, float] = {}
+    for i, lab in enumerate(labels):
+        cluster_energy[lab] = cluster_energy.get(lab, 0.0) + float(s[i]) ** 2
+
+    # Keep all clusters whose energy >= 5% of total (conservative filter)
+    # Minimum 1 component always kept
+    min_energy_frac = 0.05
+    keep_clusters = {
+        lab
+        for lab, e in cluster_energy.items()
+        if e >= min_energy_frac * total_energy
+    }
+    if not keep_clusters:
+        # Fallback: keep the largest cluster
+        keep_clusters = {max(cluster_energy, key=cluster_energy.get)}
+
+    keep = np.array(
+        [i for i, lab in enumerate(labels) if lab in keep_clusters],
+        dtype=np.intp,
+    )
+    return np.sort(keep)
 
 
 def _zero_s_except_indices(
@@ -320,30 +350,10 @@ class _EnergySvdStep:
         thr: float,
     ) -> NDArray[np.float64]:
         k = int(s.shape[0])
-        if not self.state.energy_w_corr_frozen:
-            self.state.frozen_w_corr_keep_indices = _w_corr_keep_indices(
-                u, s, vh, corr_wl, thr
-            )
-            self.state.energy_w_corr_frozen = True
-        frozen = self.state.frozen_w_corr_keep_indices
-        if not isinstance(frozen, np.ndarray):
-            raise TypeError(
-                "W-correlation frozen indices must be a numpy.ndarray; "
-                f"got {type(frozen).__name__}.",
-            )
-        keep = frozen[frozen < k].astype(np.intp, copy=False)
-        if k >= 1:
-            if keep.size == 0:
-                keep = np.array([0], dtype=np.intp)
-            elif not np.any(keep == 0):
-                keep = np.sort(
-                    np.unique(
-                        np.concatenate(
-                            (np.array([0], dtype=np.intp), keep),
-                        ),
-                    ),
-                )
-                keep = keep[keep < k]
+        keep = _w_corr_keep_indices(u, s, vh, corr_wl, thr)
+        if keep.size == 0:
+            keep = np.array([0], dtype=np.intp)
+        keep = keep[keep < k]
         return _zero_s_except_indices(s, keep)
 
     def __call__(self, data: FloatArray) -> FloatArray:
