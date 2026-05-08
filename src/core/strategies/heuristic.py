@@ -192,8 +192,8 @@ class HeuristicMultiFeatureStrategy:
         # For components with very low energy, assign low weight directly
         min_energy_threshold = 0.001 * total_energy  # 0.1% of total energy
         
-        # Limit to top 50 components for performance
-        max_components = min(50, k)
+        # Limit to top 20 components for performance (instead of 50)
+        max_components = min(20, k)
         
         for i in range(max_components):
             component_energy = s[i] * s[i]
