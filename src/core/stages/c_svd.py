@@ -400,18 +400,15 @@ class _WienerSvdStep:
         if k == 0:
             return a
 
-        # Estimate noise variance from bottom fraction of singular values
+        # Noise estimate from tail singular values (no extra svds needed)
         n_noise = max(1, int(k * self._noise_fraction))
-        noise_vals = s[-n_noise:]
-        noise_var = float(np.mean(noise_vals * noise_vals))
+        noise_var = float(np.mean(s[-n_noise:] ** 2))
 
-        # Wiener gain: w_i = max(0, 1 - noise_var / σ_i²)
+        # Wiener gain
         s_sq = s * s
         with np.errstate(divide="ignore", invalid="ignore"):
             weights = np.where(s_sq > noise_var, 1.0 - noise_var / s_sq, 0.0)
-        weights = np.clip(weights, 0.0, 1.0)
 
-        # Apply weights and reconstruct
         weighted_s = s * weights
         reconstructed = _reconstruct_usvh(u, weighted_s, vh)
         return reconstructed.astype(np.float64, copy=False)

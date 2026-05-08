@@ -4,6 +4,58 @@
 
 ---
 
+## 2026-05-08: svds (partial) vs svd (full) 对比
+
+### 目的
+
+Wiener 软加权当前用全量 `scipy.linalg.svd`（O(mn·min(m,n))），比能量截断的 `svds`（O(mn·k)）慢 ~10x。测试能否用 svds 近似 full SVD 的 Wiener 效果。
+
+### 方法
+
+单帧 Wiener 对比：
+1. Full SVD → 全部奇异值取尾部估噪 → Wiener 权重（ground truth）
+2. svds(top-k) → 用残差能量均摊估噪 → Wiener 权重（近似）
+
+### 测试条件
+
+256×1538 矩阵（L=256, F=1024, stereo），noise_fraction=0.1
+
+### 结果
+
+**单帧 svds 近似质量：**
+
+| k_probe | vs full SNR | 耗时 | 加速比 |
+|---------|------------|------|--------|
+| 8 | 20.8dB | 0.054s | 25.7x |
+| 16 | 29.6dB | 0.086s | 16.2x |
+| 32 | 30.4dB | 0.165s | 8.5x |
+| 64 | 31.7dB | 0.344s | 4.1x |
+| 128 | 34.2dB | 0.582s | 2.4x |
+| full | — | 1.397s | 1x |
+
+**全管道对比（1s 音频, 33 frames, Beethoven Adagio）：**
+
+| 方法 | SNR vs 原始 | 速度 |
+|------|------------|------|
+| 能量截断（svds partial） | 15.9dB | 12 f/s |
+| Wiener（full SVD） | **44.9dB** | 1 f/s |
+
+### 分析
+
+svds 近似质量不足：k=64 时 vs full 只有 31.7dB。原因是 svds 丢弃的尾部奇异值被均摊到噪声估计，实际噪声在各分量上分布不均匀。
+
+Full SVD 是 Wiener 的正确路径（44.9dB），瓶颈在每帧 1.4s。33 帧→37s。加速需改算法而非换 SVD 后端。
+
+### 决策
+
+两个优化方向：
+1. **CPU 向量化**：利用 Hankel 矩阵的 Toeplitz 结构，用 FFT 替代部分 SVD 计算
+2. **CUDA**：GPU 并行化 SVD + Wiener 权重计算
+
+详见下一节讨论。
+
+---
+
 ## 2026-05-08: Wiener 软加权
 
 ### 假设
