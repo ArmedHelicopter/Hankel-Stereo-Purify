@@ -38,7 +38,6 @@ def test_audio_purifier_partial_process_frame_runs() -> None:
         8,
         truncation_rank=4,
         frame_size=24,
-        hop_size=12,
     )
     fn = p._make_denoise_frame_fn()
     x = np.random.default_rng(0).standard_normal((20, 2))

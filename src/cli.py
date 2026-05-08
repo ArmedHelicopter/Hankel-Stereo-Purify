@@ -89,12 +89,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=("OLA frame size in samples (default: derived from L; positive if set)"),
     )
     parser.add_argument(
-        "--hop",
-        type=_positive_int("hop"),
-        default=None,
-        help="OLA hop in samples (default: frame_size // 2; positive if set)",
-    )
-    parser.add_argument(
         "--max-memory-mb",
         type=_positive_int("max-memory-mb"),
         default=1500,
@@ -151,7 +145,6 @@ def main(argv: list[str] | None = None) -> None:
                 args.window_length,
                 energy_fraction=args.energy_fraction,
                 frame_size=args.frame_size,
-                hop_size=args.hop,
                 max_working_memory_bytes=mem_b,
                 max_input_samples=args.max_samples,
                 w_corr_threshold=float(args.w_corr_threshold)
@@ -163,7 +156,6 @@ def main(argv: list[str] | None = None) -> None:
                 args.window_length,
                 truncation_rank=args.rank if args.rank is not None else 64,
                 frame_size=args.frame_size,
-                hop_size=args.hop,
                 max_working_memory_bytes=mem_b,
                 max_input_samples=args.max_samples,
                 w_corr_threshold=float(args.w_corr_threshold)

@@ -23,7 +23,7 @@ def test_subprocess_timeout_expired_has_cmd_and_timeout() -> None:
     assert exc.cmd == ["python", "-c", "pass"]
 
 
-def test_build_full_batch_cli_cmd_fixed_rank_with_frame_hop() -> None:
+def test_build_full_batch_cli_cmd_fixed_rank_with_frame() -> None:
     sys.path.insert(0, str(REPO_ROOT))
     from frontend.app import _build_full_batch_cli_cmd
 
@@ -35,7 +35,6 @@ def test_build_full_batch_cli_cmd_fixed_rank_with_frame_hop() -> None:
         mode_fixed_rank=True,
         rank_or_energy=64,
         frame_size=512,
-        hop=128,
     )
     assert cmd[1:9] == [
         "-m",
@@ -47,7 +46,7 @@ def test_build_full_batch_cli_cmd_fixed_rank_with_frame_hop() -> None:
         "--max-memory-mb",
         "512",
     ]
-    assert cmd[9:] == ["-k", "64", "--frame-size", "512", "--hop", "128"]
+    assert cmd[9:] == ["-k", "64", "--frame-size", "512"]
 
 
 def test_build_full_batch_cli_cmd_energy_only() -> None:
@@ -62,7 +61,6 @@ def test_build_full_batch_cli_cmd_energy_only() -> None:
         mode_fixed_rank=False,
         rank_or_energy=0.95,
         frame_size=None,
-        hop=None,
     )
     assert "--energy-fraction" in cmd
     i = cmd.index("--energy-fraction")

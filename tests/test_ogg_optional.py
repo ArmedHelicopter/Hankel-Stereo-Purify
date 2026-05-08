@@ -31,7 +31,6 @@ def test_flac_to_ogg_e2e(tmp_path: Path, require_ogg_write: None) -> None:
         window_length=16,
         truncation_rank=8,
         frame_size=64,
-        hop_size=32,
     )
     purifier.process_file(str(inp), str(out))
 

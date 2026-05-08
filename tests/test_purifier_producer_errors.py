@@ -50,7 +50,6 @@ def test_mocked_producer_fill_sets_error_and_sentinel(
         window_length=16,
         truncation_rank=8,
         frame_size=64,
-        hop_size=32,
     )
     with pytest.raises(AudioIOError, match="mock producer stream failure"):
         purifier.process_file(str(inp), str(out))
@@ -73,7 +72,6 @@ def test_process_file_numpy_linalg_error_maps_to_processing_numerical(
         window_length=16,
         truncation_rank=8,
         frame_size=64,
-        hop_size=32,
     )
     with pytest.raises(ProcessingError, match="numerical") as exc_info:
         purifier.process_file(str(inp), str(out))
@@ -97,7 +95,6 @@ def test_process_file_scipy_linalg_error_maps_to_processing_numerical(
         window_length=16,
         truncation_rank=8,
         frame_size=64,
-        hop_size=32,
     )
     with pytest.raises(ProcessingError, match="numerical") as exc_info:
         purifier.process_file(str(inp), str(out))
@@ -121,7 +118,6 @@ def test_process_file_plain_runtime_error_maps_to_unexpected(
         window_length=16,
         truncation_rank=8,
         frame_size=64,
-        hop_size=32,
     )
     with pytest.raises(ProcessingError, match="Unexpected error") as exc_info:
         purifier.process_file(str(inp), str(out))
@@ -150,7 +146,6 @@ def test_process_file_numpy_core_runtime_error_maps_to_unexpected(
         window_length=16,
         truncation_rank=8,
         frame_size=64,
-        hop_size=32,
     )
     with pytest.raises(ProcessingError, match="Unexpected error") as exc_info:
         purifier.process_file(str(inp), str(out))

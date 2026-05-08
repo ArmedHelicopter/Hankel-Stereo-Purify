@@ -90,7 +90,6 @@ class AudioPurifier:
         truncation_rank: int | None = None,
         energy_fraction: float | None = None,
         frame_size: int | None = None,
-        hop_size: int | None = None,
         max_working_memory_bytes: int = 1_500_000_000,
         max_input_samples: int | None = None,
         w_corr_threshold: float | None = None,
@@ -123,9 +122,9 @@ class AudioPurifier:
             if frame_size is not None
             else max(self.window_length + 8, (self.window_length * 3 + 1) // 2)
         )
-        self.hop_size = (
-            hop_size if hop_size is not None else max(1, self.frame_size // 2)
-        )
+        # 50% overlap is the only mathematically valid setting for sqrt-Hanning
+        # OLA — other ratios cause amplitude modulation artifacts (buzzing).
+        self.hop_size = max(1, self.frame_size // 2)
         self.max_working_memory_bytes = max_working_memory_bytes
         self.max_input_samples = _resolve_max_input_samples(max_input_samples)
         self.logger = get_logger(self.__class__.__name__)
@@ -231,10 +230,6 @@ class AudioPurifier:
             raise ConfigurationError("Window length must be a positive integer.")
         if self.frame_size < self.window_length:
             raise ConfigurationError("frame_size must be >= window_length.")
-        if self.hop_size <= 0 or self.hop_size >= self.frame_size:
-            raise ConfigurationError(
-                "hop_size must be positive and smaller than frame_size."
-            )
         if self.energy_fraction is not None:
             if not 0.0 < self.energy_fraction <= 1.0:
                 raise ConfigurationError("energy_fraction must be in (0, 1].")

@@ -56,7 +56,7 @@ def compute_w_correlation_matrix(
     weights = np.minimum(idx, np.minimum(window_length, sequence_length - idx + 1))
 
     weighted_components = arr * weights
-    inner_products = weighted_components @ arr.T
+    inner_products = weighted_components @ weighted_components.T
     norms = np.sqrt(np.diag(inner_products))
 
     with np.errstate(divide="ignore", invalid="ignore"):

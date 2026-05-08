@@ -21,7 +21,6 @@ def _purifier_std() -> AudioPurifier:
         window_length=16,
         truncation_rank=8,
         frame_size=64,
-        hop_size=32,
     )
 
 
@@ -33,7 +32,6 @@ def test_shutdown_pcm_producer_warns_when_thread_still_alive(
         window_length=16,
         truncation_rank=8,
         frame_size=64,
-        hop_size=32,
     )
 
     class _FakeThread:
@@ -68,7 +66,6 @@ def test_process_file_rejects_input_longer_than_max_samples(tmp_path: Path) -> N
         window_length=16,
         truncation_rank=8,
         frame_size=64,
-        hop_size=32,
         max_input_samples=100,
     )
     with pytest.raises(ConfigurationError, match="limit is 100"):
@@ -210,7 +207,6 @@ def test_process_file_wav_to_wav_roundtrip(tmp_path: Path) -> None:
 
     wl = 16
     fs = 64
-    hop = 32
     k_h = fs - wl + 1
     rank = min(wl, 2 * k_h)
 
@@ -218,7 +214,6 @@ def test_process_file_wav_to_wav_roundtrip(tmp_path: Path) -> None:
         window_length=wl,
         truncation_rank=rank,
         frame_size=fs,
-        hop_size=hop,
     )
     purifier.process_file(str(inp), str(out))
 
@@ -247,7 +242,6 @@ def test_process_file_roundtrip_shape_and_finite(tmp_path: Path) -> None:
 
     wl = 16
     fs = 64
-    hop = 32
     k_h = fs - wl + 1
     rank = min(wl, 2 * k_h)
 
@@ -255,7 +249,6 @@ def test_process_file_roundtrip_shape_and_finite(tmp_path: Path) -> None:
         window_length=wl,
         truncation_rank=rank,
         frame_size=fs,
-        hop_size=hop,
     )
     purifier.process_file(str(inp), str(out))
 
@@ -274,7 +267,6 @@ def test_process_file_uses_memmap_when_budget_tight(tmp_path: Path) -> None:
 
     wl = 16
     fs = 64
-    hop = 32
     k_h = fs - wl + 1
     rank = min(wl, 2 * k_h)
 
@@ -282,7 +274,6 @@ def test_process_file_uses_memmap_when_budget_tight(tmp_path: Path) -> None:
         wl,
         truncation_rank=rank,
         frame_size=fs,
-        hop_size=hop,
         max_working_memory_bytes=1000,
     )
     purifier.process_file(str(inp), str(out))
@@ -329,7 +320,6 @@ def test_memmap_allocation_failure_maps_to_audio_io_error(
         16,
         truncation_rank=8,
         frame_size=64,
-        hop_size=32,
         max_working_memory_bytes=1000,
     )
     with pytest.raises(AudioIOError, match="temp buffers"):
@@ -361,7 +351,6 @@ def test_memmap_second_allocation_failure_maps_to_audio_io_error(
         16,
         truncation_rank=8,
         frame_size=64,
-        hop_size=32,
         max_working_memory_bytes=1000,
     )
     with pytest.raises(AudioIOError, match="temp buffers"):
@@ -399,7 +388,6 @@ def test_process_file_energy_fraction_roundtrip(tmp_path: Path) -> None:
         window_length=32,
         energy_fraction=0.95,
         frame_size=128,
-        hop_size=64,
         max_working_memory_bytes=500_000_000,
     )
     purifier.process_file(str(inp), str(out))

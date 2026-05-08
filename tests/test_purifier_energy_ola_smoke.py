@@ -21,7 +21,6 @@ def test_process_file_energy_fraction_ola_short_stereo(tmp_path: Path) -> None:
         32,
         energy_fraction=0.95,
         frame_size=128,
-        hop_size=64,
         max_working_memory_bytes=50 * 1024 * 1024,
     )
     purifier.process_file(str(inp), str(out))

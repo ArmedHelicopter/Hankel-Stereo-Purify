@@ -259,41 +259,54 @@ def main() -> None:
     audio, sr = sf.read(str(src_file), dtype="float64")
     print(f"  sr={sr}, shape={audio.shape}, duration={audio.shape[0]/sr:.1f}s")
 
-    # Skip initial silence, take ~4s for ~3s output (keep test fast)
+    # Skip initial silence, take ~5s for ~3s output
     skip_samples = int(sr * 0.5)
-    audio = audio[skip_samples:skip_samples + int(sr * 4.5)]
+    audio = audio[skip_samples:skip_samples + int(sr * 5.5)]
     print(f"  Using {audio.shape[0]} samples ({audio.shape[0]/sr:.1f}s)")
 
     energy_fraction = 0.9
-    w_corr_threshold = 0.3
 
-    # Configs: small L (should work) vs large L (may diverge)
+    # Test energy-only with different hop values to isolate OLA artifacts
     configs = [
-        (1024, 256, 1024),
-        (1024, 512, 1024),
+        (1024, 256, 1024, "no_overlap"),    # hop=F (no overlap, current bad case)
+        (1024, 256, 512, "50pct_overlap"),   # hop=F/2 (50% overlap)
+        (1024, 256, 256, "75pct_overlap"),   # hop=F/4 (75% overlap)
     ]
 
     results: list[GridResult] = []
     suffix = src_file.suffix
 
-    for i, (F, L, hop) in enumerate(configs):
-        print(f"\n[{i+1}/{len(configs)}] F={F} L={L} hop={hop} (frames: {len(compute_frame_starts(audio.shape[0], F, hop))})")
+    for i, (F, L, hop, label) in enumerate(configs):
+        frames = compute_frame_starts(audio.shape[0], F, hop)
+        print(f"\n[{i+1}/{len(configs)}] {label}: F={F} L={L} hop={hop} (frames: {len(frames)})")
         try:
-            result = run_single_config(
-                audio, sr, F, L, hop,
-                energy_fraction, w_corr_threshold,
-                output_dir, suffix,
-            )
-            results.append(result)
-            print(f"  SNR vs original:")
-            print(f"    energy_only:  {result.snr_energy_vs_original:.1f}dB")
-            print(f"    energy+wcorr: {result.snr_wcorr_vs_original:.1f}dB")
-            print(f"    energy+naive: {result.snr_naive_vs_original:.1f}dB")
-            print(f"  SNR between outputs:")
-            print(f"    wcorr vs energy: {result.snr_wcorr_vs_energy:.1f}dB")
-            print(f"    naive vs energy: {result.snr_naive_vs_energy:.1f}dB")
-            print(f"    naive vs wcorr:  {result.snr_naive_vs_wcorr:.1f}dB")
-            print(f"  Time: energy={result.energy_time_s:.1f}s  frozen={result.frozen_time_s:.1f}s  naive={result.naive_time_s:.1f}s")
+            strat = EnergyThresholdStrategy(energy_fraction)
+            tag = f"F{F}_L{L}_hop{hop}"
+
+            # Energy only
+            energy_step = _EnergySvdStep(strat, w_corr_threshold=None, window_length=L)
+            energy_frames = []
+            t0 = time.perf_counter()
+            for s in frames:
+                frame = audio[s:s+F]
+                if frame.shape[0] < F:
+                    break
+                energy_frames.append(process_frame(frame, window_length=L, svd_step=energy_step))
+            energy_time = time.perf_counter() - t0
+
+            # OLA reconstruct
+            actual_starts = [s for s in frames if s + F <= audio.shape[0]]
+            total_samples = actual_starts[-1] + F
+            energy_out = ola_reconstruct(energy_frames, actual_starts, F, total_samples)
+            original = audio[:total_samples]
+
+            # Save
+            sf.write(str(output_dir / f"original_{tag}{suffix}"), original, sr)
+            sf.write(str(output_dir / f"energy_only_{tag}{suffix}"), energy_out, sr)
+
+            snr = compute_snr(original, energy_out)
+            print(f"  SNR vs original: {snr:.1f}dB  time: {energy_time:.1f}s")
+            print(f"  Output: {output_dir / f'energy_only_{tag}{suffix}'}")
         except Exception as e:
             print(f"  FAILED: {e}")
 

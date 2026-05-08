@@ -115,8 +115,6 @@ def test_cli_rejects_long_input_via_hsp_max_samples_env_only(tmp_path: Path) -> 
             "8",
             "--frame-size",
             "64",
-            "--hop",
-            "32",
         ],
         cwd=repo_root,
         env=env,

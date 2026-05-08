@@ -184,7 +184,6 @@ def _build_full_batch_cli_cmd(
     mode_fixed_rank: bool,
     rank_or_energy: float | int,
     frame_size: int | None,
-    hop: int | None,
 ) -> list[str]:
     """Assemble ``python -m src.cli …`` argv for the full-batch tab (testable, no shell)."""
     cmd: list[str] = [
@@ -204,8 +203,6 @@ def _build_full_batch_cli_cmd(
         cmd.extend(["--energy-fraction", str(rank_or_energy)])
     if frame_size is not None:
         cmd.extend(["--frame-size", str(int(frame_size))])
-    if hop is not None:
-        cmd.extend(["--hop", str(int(hop))])
     return cmd
 
 
@@ -428,7 +425,6 @@ def main() -> None:
                         frame_size=(
                             int(fs_none) if fs_none is not None else None
                         ),
-                        hop=int(hop_none) if hop_none is not None else None,
                     )
                     env = {**os.environ, "PYTHONPATH": _repo_pythonpath()}
                     st.code(" ".join(cmd), language="bash")

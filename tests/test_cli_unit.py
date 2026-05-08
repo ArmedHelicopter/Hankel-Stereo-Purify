@@ -64,8 +64,6 @@ def test_main_runs_on_short_flac_with_w_corr_threshold(tmp_path: Path) -> None:
             "8",
             "--frame-size",
             "64",
-            "--hop",
-            "32",
             "--max-memory-mb",
             "500",
             "--w-corr-threshold",
@@ -96,8 +94,6 @@ def test_main_rejects_w_corr_threshold_out_of_range(tmp_path: Path) -> None:
                 "8",
                 "--frame-size",
                 "64",
-                "--hop",
-                "32",
                 "--w-corr-threshold",
                 "1.5",
             ]
@@ -121,8 +117,6 @@ def test_main_runs_on_short_flac(tmp_path: Path) -> None:
             "8",
             "--frame-size",
             "64",
-            "--hop",
-            "32",
             "--max-memory-mb",
             "500",
         ]
@@ -158,8 +152,6 @@ def test_main_configuration_error_exits_2_same_paths(tmp_path: Path) -> None:
                 "8",
                 "--frame-size",
                 "64",
-                "--hop",
-                "32",
             ]
         )
     assert e.value.code == 2
@@ -192,8 +184,6 @@ def test_main_max_samples_exits_2(
                 "8",
                 "--frame-size",
                 "64",
-                "--hop",
-                "32",
             ]
         )
     assert e.value.code == 2
