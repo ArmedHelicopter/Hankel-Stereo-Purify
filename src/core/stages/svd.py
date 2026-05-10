@@ -254,37 +254,24 @@ def make_fixed_rank_svd_step(
 # ── CUDA-accelerated SVD step ──────────────────────────────────────────────
 
 class _CudaFixedRankSvdStep:
-    """Fixed-rank SVD via GPU (cuSOLVER).  Per-frame upload/download."""
+    """Fixed-rank SVD via GPU randomized SVD.  Per-frame upload/download."""
 
     __slots__ = ("_k", "_ctx")
 
     def __init__(self, k: int) -> None:
         self._k = k
-        self._ctx: CudaSvdContext | None = None
+        self._ctx = None  # lazy init
 
     def __call__(self, data: FloatArray) -> FloatArray:
         a = _prepare_svd_frame(data)
         m, n = a.shape  # m = L, n = 2K
         if self._ctx is None:
+            from src.cuda.mssa_rand_cuda import CudaRandSvdContext
             # C-contiguous (m, n) → column-major (n, m)
-            from src.cuda.mssa_cuda import CudaSvdContext
-            self._ctx = CudaSvdContext(m=n, n=m, max_batch=1)
+            self._ctx = CudaRandSvdContext(m=n, n=m, rank=self._k, oversample=16)
 
-        from src.cuda.mssa_cuda import _load_lib
-        _lib = _load_lib()
-        if _lib is None:
-            raise RuntimeError("CUDA SVD library lost")
-
-        a_c = np.ascontiguousarray(a, dtype=np.float64)
-        output = np.empty(self._ctx._m * self._ctx._n, dtype=np.float64)
-
-        _lib.mssa_svd_upload(a_c.ctypes.data, 1)
-        _lib.mssa_svd_run(1, self._k)
-        _lib.mssa_svd_download(output.ctypes.data, 1)
-
-        # output is column-major cu_m×cu_n = C-contiguous cu_n×cu_m
-        # cu_n = orig_m, cu_m = orig_n → reshape to (orig_m, orig_n) ✓
-        return output.reshape(self._ctx._n, self._ctx._m).astype(np.float64, copy=False)
+        results = self._ctx.run([a])
+        return results[0]
 
 
 def make_svd_step(
