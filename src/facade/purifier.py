@@ -29,7 +29,7 @@ from src.core.exceptions import (
 from src.core.linalg_errors import MSSA_ARPACK_ERRORS, MSSA_LINALG_ERRORS
 from src.core.process_frame import process_frame
 from src.core.stages.svd import make_svd_step
-from src.core.stages.filter import design_filters, split_signal
+from src.core.stages.filter import split_signal
 from src.core.strategies.truncation import (
     EnergyThresholdStrategy,
     FixedRankStrategy,
@@ -94,6 +94,7 @@ class AudioPurifier:
         max_working_memory_bytes: int = 1_500_000_000,
         max_input_samples: int | None = None,
         bypass_freq: float | None = None,
+        use_cuda: bool = False,
     ) -> None:
         if not isinstance(window_length, int) or window_length <= 0:
             raise ConfigurationError("window_length must be a positive integer.")
@@ -125,6 +126,7 @@ class AudioPurifier:
         # OLA — other ratios cause amplitude modulation artifacts (buzzing).
         self.hop_size = max(1, self.frame_size // 2)
         self.bypass_freq = bypass_freq
+        self.use_cuda = use_cuda
         self.max_working_memory_bytes = max_working_memory_bytes
         self.max_input_samples = _resolve_max_input_samples(max_input_samples)
         self.logger = get_logger(self.__class__.__name__)
@@ -254,7 +256,7 @@ class AudioPurifier:
             strat = EnergyThresholdStrategy(self.energy_fraction)
         else:
             strat = FixedRankStrategy(self.truncation_rank)
-        svd_step = make_svd_step(strat)
+        svd_step = make_svd_step(strat, use_cuda=self.use_cuda)
         return partial(
             process_frame,
             window_length=self.window_length,
@@ -317,8 +319,7 @@ class AudioPurifier:
         signal, file_sr = sf.read(input_path, dtype="float64")
         assert file_sr == sr
 
-        lp_sos, hp_sos = design_filters(self.bypass_freq, sr)
-        low_band, high_band = split_signal(signal, lp_sos, hp_sos)
+        low_band, high_band = split_signal(signal, self.bypass_freq, sr)
 
         self.logger.info(
             "Low band RMS: %.6f | High band RMS: %.6f",

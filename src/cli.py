@@ -118,6 +118,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Based on noise analysis: noise is in high frequencies, low-mid is clean."
         ),
     )
+    parser.add_argument(
+        "--cuda",
+        action="store_true",
+        default=False,
+        help=(
+            "Use GPU-accelerated SVD via cuSOLVER (requires compiled CUDA library). "
+            "Only works with --rank (fixed-rank truncation)."
+        ),
+    )
     return parser
 
 
@@ -149,6 +158,7 @@ def main(argv: list[str] | None = None) -> None:
                 max_working_memory_bytes=mem_b,
                 max_input_samples=args.max_samples,
                 bypass_freq=args.bypass_freq,
+                use_cuda=args.cuda,
             )
         else:
             purifier = AudioPurifier(
@@ -158,6 +168,7 @@ def main(argv: list[str] | None = None) -> None:
                 max_working_memory_bytes=mem_b,
                 max_input_samples=args.max_samples,
                 bypass_freq=args.bypass_freq,
+                use_cuda=args.cuda,
             )
         mode = (
             f"energy={purifier.energy_fraction}"

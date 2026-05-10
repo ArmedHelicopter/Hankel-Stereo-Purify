@@ -1,25 +1,31 @@
 """Bandpass filter: split full signal into low (bypass) and high (SVD) bands.
 
-Uses causal Butterworth IIR filter (sosfilt) which works on full signals.
-The low band skips SVD entirely; only the high band goes through MSSA.
+Uses zero-phase Butterworth IIR filter (sosfiltfilt) on full signal.
+Perfect reconstruction: high_band = signal - low_band (guarantees low + high == original).
 """
 
 from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.signal import butter, sosfilt
+from scipy.signal import butter, sosfiltfilt
 
 
-def design_filters(
+def split_signal(
+    signal: NDArray[np.float64],
     cutoff_hz: float,
     sample_rate: int,
     order: int = 4,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Design lowpass and highpass Butterworth filters.
+    """Split signal into low and high frequency bands.
+
+    Uses zero-phase filtering (sosfiltfilt) to avoid phase distortion.
+    Perfect reconstruction: low_band + high_band == signal (exactly).
 
     Parameters
     ----------
+    signal : NDArray, shape (N,) or (N, C)
+        Input audio signal.
     cutoff_hz : float
         Cutoff frequency in Hz.
     sample_rate : int
@@ -29,8 +35,8 @@ def design_filters(
 
     Returns
     -------
-    lowpass_sos, highpass_sos : NDArray
-        Second-order sections for each filter.
+    low_band, high_band : NDArray
+        Low and high frequency components. low_band + high_band == signal.
     """
     nyq = sample_rate / 2.0
     if cutoff_hz <= 0 or cutoff_hz >= nyq:
@@ -38,37 +44,12 @@ def design_filters(
             f"cutoff_hz={cutoff_hz} must be in (0, {nyq}) for sr={sample_rate}"
         )
     normalized = cutoff_hz / nyq
-    lowpass_sos = butter(order, normalized, btype="low", output="sos")
-    highpass_sos = butter(order, normalized, btype="high", output="sos")
-    return lowpass_sos, highpass_sos
+    lp_sos = butter(order, normalized, btype="low", output="sos")
 
+    # Zero-phase filtering (forward + backward, no phase distortion)
+    low_band = sosfiltfilt(lp_sos, signal, axis=0).astype(signal.dtype, copy=False)
 
-def split_signal(
-    signal: NDArray[np.float64],
-    lowpass_sos: NDArray[np.float64],
-    highpass_sos: NDArray[np.float64],
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Split signal into low and high frequency bands.
+    # Perfect reconstruction: high = original - low
+    high_band = signal - low_band
 
-    Parameters
-    ----------
-    signal : NDArray, shape (N,) or (N, C)
-        Input audio signal.
-    lowpass_sos, highpass_sos : NDArray
-        Filter coefficients from design_filters.
-
-    Returns
-    -------
-    low_band, high_band : NDArray
-        Low and high frequency components.
-    """
-    if signal.ndim == 1:
-        low_band = sosfilt(lowpass_sos, signal)
-        high_band = sosfilt(highpass_sos, signal)
-    else:
-        low_band = np.empty_like(signal)
-        high_band = np.empty_like(signal)
-        for ch in range(signal.shape[1]):
-            low_band[:, ch] = sosfilt(lowpass_sos, signal[:, ch])
-            high_band[:, ch] = sosfilt(highpass_sos, signal[:, ch])
     return low_band, high_band

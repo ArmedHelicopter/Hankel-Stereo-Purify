@@ -249,3 +249,74 @@ def make_fixed_rank_svd_step(
     if truncation_rank <= 0:
         raise ValueError("Truncation rank must be positive.")
     return _make_svd_step_fixed_rank(FixedRankStrategy(truncation_rank))
+
+
+# ── CUDA-accelerated SVD step ──────────────────────────────────────────────
+
+class _CudaFixedRankSvdStep:
+    """Fixed-rank SVD via GPU (cuSOLVER).  Per-frame upload/download."""
+
+    __slots__ = ("_k", "_ctx")
+
+    def __init__(self, k: int) -> None:
+        self._k = k
+        self._ctx: CudaSvdContext | None = None
+
+    def __call__(self, data: FloatArray) -> FloatArray:
+        a = _prepare_svd_frame(data)
+        m, n = a.shape  # m = L, n = 2K
+        if self._ctx is None:
+            # C-contiguous (m, n) → column-major (n, m)
+            from src.cuda.mssa_cuda import CudaSvdContext
+            self._ctx = CudaSvdContext(m=n, n=m, max_batch=1)
+
+        from src.cuda.mssa_cuda import _load_lib
+        _lib = _load_lib()
+        if _lib is None:
+            raise RuntimeError("CUDA SVD library lost")
+
+        a_c = np.ascontiguousarray(a, dtype=np.float64)
+        output = np.empty(self._ctx._m * self._ctx._n, dtype=np.float64)
+
+        _lib.mssa_svd_upload(a_c.ctypes.data, 1)
+        _lib.mssa_svd_run(1, self._k)
+        _lib.mssa_svd_download(output.ctypes.data, 1)
+
+        # output is column-major cu_m×cu_n = C-contiguous cu_n×cu_m
+        # cu_n = orig_m, cu_m = orig_n → reshape to (orig_m, orig_n) ✓
+        return output.reshape(self._ctx._n, self._ctx._m).astype(np.float64, copy=False)
+
+
+def make_svd_step(
+    truncation_strategy: TruncationStrategy,
+    *,
+    use_cuda: bool = False,
+) -> Callable[[FloatArray], FloatArray]:
+    """Return a stateful SVD+truncate callable (one per OLA / preview run).
+
+    Dispatches on the concrete strategy type once at construction; the returned
+    callable does not branch on ``isinstance`` per frame.
+
+    Parameters
+    ----------
+    truncation_strategy
+        Fixed-rank or energy-threshold strategy.
+    use_cuda
+        If True and CUDA library is available, use GPU-accelerated SVD
+        (only supported for FixedRankStrategy).
+    """
+    if isinstance(truncation_strategy, FixedRankStrategy):
+        if use_cuda:
+            try:
+                from src.cuda.mssa_cuda import is_available
+                if is_available():
+                    return _CudaFixedRankSvdStep(truncation_strategy.k)
+            except Exception:
+                pass  # Fall through to CPU
+        return _make_svd_step_fixed_rank(truncation_strategy)
+    if isinstance(truncation_strategy, EnergyThresholdStrategy):
+        return _make_svd_step_energy(truncation_strategy)
+    raise TypeError(
+        "truncation_strategy must be FixedRankStrategy or EnergyThresholdStrategy, "
+        f"got {type(truncation_strategy).__name__!r}",
+    )
