@@ -25,22 +25,20 @@ from src.core.exceptions import (
     ProcessingFailureCode,
     exception_fully_qualified_name,
     format_exception_origin,
-    validate_w_corr_threshold,
 )
 from src.core.linalg_errors import MSSA_ARPACK_ERRORS, MSSA_LINALG_ERRORS
 from src.core.process_frame import process_frame
-from src.core.stages.c_svd import make_svd_step
+from src.core.stages.svd import make_svd_step
 from src.core.strategies.truncation import (
     EnergyThresholdStrategy,
     FixedRankStrategy,
-    HeuristicStrategy,
-    WienerStrategy,
     TruncationStrategy,
 )
 from src.facade.ola import sqrt_hanning_weights
 from src.facade.pcm_producer import producer_fill_queue
 from src.facade.soundfile_ola import SoundfileOlaEngine
 from src.io.audio_formats import validate_io_paths
+from src.io.audio_stream import read_audio_metadata
 from src.io.io_messages import (
     audio_io_failed_pair,
     input_file_does_not_exist,
@@ -84,8 +82,6 @@ class AudioPurifier:
     window_length: int
     truncation_rank: int
     energy_fraction: float | None
-    wiener_noise_fraction: float | None
-    heuristic_strategy: HeuristicStrategy | None
 
     def __init__(
         self,
@@ -93,44 +89,31 @@ class AudioPurifier:
         *,
         truncation_rank: int | None = None,
         energy_fraction: float | None = None,
-        wiener_noise_fraction: float | None = None,
-        heuristic_strategy: HeuristicStrategy | None = None,
         frame_size: int | None = None,
         max_working_memory_bytes: int = 1_500_000_000,
         max_input_samples: int | None = None,
-        w_corr_threshold: float | None = None,
+        bypass_freq: float | None = None,
     ) -> None:
         if not isinstance(window_length, int) or window_length <= 0:
             raise ConfigurationError("window_length must be a positive integer.")
-        modes = [v for v in (truncation_rank, energy_fraction, wiener_noise_fraction, heuristic_strategy) if v is not None]
+        modes = [v for v in (truncation_rank, energy_fraction) if v is not None]
         if len(modes) == 0:
             raise ConfigurationError(
-                "Missing truncation mode: pass truncation_rank=... for fixed k, "
-                "energy_fraction=... for energy-based rank, "
-                "wiener_noise_fraction=... for Wiener soft weighting, "
-                "or heuristic_strategy=... for heuristic multi-feature weighting."
+                "Missing truncation mode: pass truncation_rank=... for fixed k "
+                "or energy_fraction=... for energy-based rank."
             )
         if len(modes) > 1:
             raise ConfigurationError(
-                "Use exactly one of truncation_rank, energy_fraction, wiener_noise_fraction, heuristic_strategy."
+                "Use exactly one of truncation_rank, energy_fraction."
             )
-        validate_w_corr_threshold(w_corr_threshold)
 
         self.window_length = window_length
-        self.w_corr_threshold = w_corr_threshold
         self.truncation_rank = 0
         self.energy_fraction = None
-        self.wiener_noise_fraction = None
-        self.heuristic_strategy = None
         if energy_fraction is not None:
             self.energy_fraction = energy_fraction
         elif truncation_rank is not None:
             self.truncation_rank = truncation_rank
-        elif wiener_noise_fraction is not None:
-            self.wiener_noise_fraction = wiener_noise_fraction
-        else:
-            assert heuristic_strategy is not None
-            self.heuristic_strategy = heuristic_strategy
 
         self.frame_size = (
             frame_size
@@ -140,6 +123,7 @@ class AudioPurifier:
         # 50% overlap is the only mathematically valid setting for sqrt-Hanning
         # OLA — other ratios cause amplitude modulation artifacts (buzzing).
         self.hop_size = max(1, self.frame_size // 2)
+        self.bypass_freq = bypass_freq
         self.max_working_memory_bytes = max_working_memory_bytes
         self.max_input_samples = _resolve_max_input_samples(max_input_samples)
         self.logger = get_logger(self.__class__.__name__)
@@ -249,13 +233,6 @@ class AudioPurifier:
             if not 0.0 < self.energy_fraction <= 1.0:
                 raise ConfigurationError("energy_fraction must be in (0, 1].")
             return
-        if self.wiener_noise_fraction is not None:
-            if not 0.0 < self.wiener_noise_fraction < 1.0:
-                raise ConfigurationError("wiener_noise_fraction must be in (0, 1).")
-            return
-        if self.heuristic_strategy is not None:
-            # Heuristic strategy validation is done in its constructor
-            return
         if self.truncation_rank <= 0:
             raise ConfigurationError("Truncation rank must be a positive integer.")
         if self.truncation_rank > self.window_length:
@@ -270,23 +247,20 @@ class AudioPurifier:
 
     def _make_denoise_frame_fn(
         self,
+        sample_rate: int | None = None,
     ) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
         strat: TruncationStrategy
         if self.energy_fraction is not None:
             strat = EnergyThresholdStrategy(self.energy_fraction)
-        elif self.wiener_noise_fraction is not None:
-            strat = WienerStrategy(self.wiener_noise_fraction)
-        elif self.heuristic_strategy is not None:
-            strat = self.heuristic_strategy
         else:
             strat = FixedRankStrategy(self.truncation_rank)
-        wc = self.w_corr_threshold
-        c_wl = self.window_length if wc is not None else None
-        svd_step = make_svd_step(strat, w_corr_threshold=wc, window_length=c_wl)
+        svd_step = make_svd_step(strat)
         return partial(
             process_frame,
             window_length=self.window_length,
             svd_step=svd_step,
+            sample_rate=sample_rate,
+            bypass_freq=self.bypass_freq,
         )
 
     def _run_processing(self, input_path: str, output_path: str) -> None:
@@ -296,7 +270,15 @@ class AudioPurifier:
         w_sqrt = sqrt_hanning_weights(f_size)[:, np.newaxis]
         w_sq = (w_sqrt * w_sqrt).ravel()
 
-        denoise_frame = self._make_denoise_frame_fn()
+        # Read sample rate for bandpass filter
+        sr = None
+        if self.bypass_freq is not None:
+            sr = read_audio_metadata(input_path).samplerate
+            self.logger.info(
+                "Bandpass filter: bypass <%.0f Hz (sr=%d)", self.bypass_freq, sr
+            )
+
+        denoise_frame = self._make_denoise_frame_fn(sample_rate=sr)
 
         profile = os.environ.get("HSP_PROFILE_OLA", "").strip().lower() in (
             "1",

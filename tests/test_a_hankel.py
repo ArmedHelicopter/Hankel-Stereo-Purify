@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from src.core.stages.a_hankel import hankel_embed
+from src.core.stages.hankel import hankel_embed
 
 
 def test_hankel_embed_shapes() -> None:

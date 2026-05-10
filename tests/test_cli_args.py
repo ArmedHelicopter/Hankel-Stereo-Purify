@@ -60,23 +60,6 @@ def test_cli_rejects_energy_fraction_out_of_range(tmp_path: Path) -> None:
     assert proc2.returncode == 2
 
 
-def test_cli_rejects_w_corr_threshold_out_of_range(tmp_path: Path) -> None:
-    inp = tmp_path / "in.flac"
-    out = tmp_path / "out.flac"
-    sf.write(inp, np.zeros((50, 2)), 48_000, format="FLAC", subtype="PCM_24")
-    repo_root = Path(__file__).resolve().parents[1]
-    proc = _run_cli(
-        repo_root,
-        [str(inp), str(out), "-k", "8", "--w-corr-threshold", "-0.1"],
-    )
-    assert proc.returncode == 2
-    proc2 = _run_cli(
-        repo_root,
-        [str(inp), str(out), "-k", "8", "--w-corr-threshold", "2"],
-    )
-    assert proc2.returncode == 2
-
-
 def test_cli_argparse_rejects_non_positive_frame_size(tmp_path: Path) -> None:
     inp = tmp_path / "in.flac"
     out = tmp_path / "out.flac"

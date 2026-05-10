@@ -20,7 +20,7 @@ import soundfile as sf
 from numpy.typing import NDArray
 
 from src.core.process_frame import process_frame
-from src.core.stages.c_svd import _EnergySvdStep
+from src.core.stages.svd import _EnergySvdStep
 from src.core.strategies.truncation import EnergyThresholdStrategy
 
 
@@ -100,7 +100,7 @@ def main():
 
     # Energy-only SVD step (no W-correlation)
     strat = EnergyThresholdStrategy(energy_fraction)
-    svd_step = _EnergySvdStep(strat, w_corr_threshold=None, window_length=L)
+    svd_step = _EnergySvdStep(strat)
 
     print("\nRunning energy-only denoising...")
     t0 = time.perf_counter()

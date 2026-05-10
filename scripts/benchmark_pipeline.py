@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Micro-benchmark: A→B→C→D per-frame wall time (perf_counter). No changes to src/.
 
-When ``--w-corr-threshold`` is set, stage C includes W-correlation work; expect
+When ``--cprofile`` is set, stage C runs a cProfile dump; expect
 noticeably higher per-frame time than the default (no W filter), especially in
 energy mode where the first frame pays full W setup.
 
@@ -29,11 +29,10 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from src.core.array_types import FloatArray  # noqa: E402
-from src.core.exceptions import validate_w_corr_threshold  # noqa: E402
-from src.core.stages.a_hankel import hankel_embed  # noqa: E402
-from src.core.stages.b_multichannel import combine_hankel_blocks  # noqa: E402
-from src.core.stages.c_svd import make_svd_step  # noqa: E402
-from src.core.stages.d_diagonal import (  # noqa: E402
+from src.core.stages.hankel import hankel_embed  # noqa: E402
+from src.core.stages.multichannel import combine_hankel_blocks  # noqa: E402
+from src.core.stages.svd import make_svd_step  # noqa: E402
+from src.core.stages.diagonal import (  # noqa: E402
     batched_diagonal_average,
     diagonal_reconstruct,
 )
@@ -70,12 +69,6 @@ def main() -> None:
         default=None,
         help="If set, use energy mode",
     )
-    p.add_argument(
-        "--w-corr-threshold",
-        type=float,
-        default=None,
-        help="If set, measure W-corr cold/hot on same joint tensor",
-    )
     p.add_argument("--repeats", type=int, default=15)
     p.add_argument("--warmup", type=int, default=2)
     p.add_argument(
@@ -92,9 +85,6 @@ def main() -> None:
         ),
     )
     args = p.parse_args()
-    if args.w_corr_threshold is not None:
-        validate_w_corr_threshold(float(args.w_corr_threshold))
-
     rng = np.random.default_rng(2026)
     f_samples, win_len = args.frames, args.window_length
     if f_samples < win_len:
@@ -184,25 +174,6 @@ def main() -> None:
                 f"Stage D split: batched_diagonal_average {100 * mb_ / mf:.1f}% "
                 f"of diagonal_reconstruct wall time (median, same mid tensor)"
             )
-
-    if args.w_corr_threshold is not None:
-        c_w = make_svd_step(
-            strat,
-            w_corr_threshold=float(args.w_corr_threshold),
-            window_length=win_len,
-        )
-        hl, hr = hankel_embed(win_len, stereo)
-        joint = combine_hankel_blocks(hl, hr)
-        t0 = time.perf_counter()
-        _ = c_w(joint)
-        cold = time.perf_counter() - t0
-        t0 = time.perf_counter()
-        _ = c_w(joint)
-        hot = time.perf_counter() - t0
-        print(f"Stage C W-corr cold (1st): {cold * 1e3:.3f} ms")
-        print(f"Stage C W-corr hot  (2nd): {hot * 1e3:.3f} ms")
-        if cold > 1e-9:
-            print(f"Hot/Cold ratio: {hot / cold:.3f}")
 
     if args.cprofile:
         c_prof = make_svd_step(strat)

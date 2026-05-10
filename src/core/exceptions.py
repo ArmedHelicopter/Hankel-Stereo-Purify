@@ -65,19 +65,3 @@ def format_exception_origin(exc: BaseException) -> str:
         tb = tb.tb_next
     co = tb.tb_frame.f_code
     return f"{Path(co.co_filename).name}:{tb.tb_lineno}:{co.co_name}"
-
-
-def validate_w_corr_threshold(value: float | None) -> None:
-    """Raise ``ConfigurationError`` if ``value`` is set and outside ``[0.0, 1.0]``.
-
-    W-correlation entries lie in ``[0, 1]``; the CLI threshold is compared
-    with ``W[i, 0]`` in the SVD step from :func:`src.core.stages.c_svd.make_svd_step`.
-    """
-    if value is None:
-        return
-    v = float(value)
-    if not (0.0 <= v <= 1.0):
-        raise ConfigurationError(
-            "w_corr_threshold must be in [0.0, 1.0] inclusive "
-            "(same range as W-correlation matrix entries)."
-        )

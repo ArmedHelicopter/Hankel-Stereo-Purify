@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from src.core.stages.c_svd import make_svd_step
+from src.core.stages.svd import make_svd_step
 from src.core.strategies.truncation import FixedRankStrategy
 
 

@@ -18,12 +18,6 @@ def test_parse_args_defaults() -> None:
     assert ns.window_length == 256
     assert ns.rank is None
     assert ns.energy_fraction is None
-    assert ns.w_corr_threshold is None
-
-
-def test_parse_args_w_corr_threshold() -> None:
-    ns = parse_args(["a.flac", "b.flac", "--w-corr-threshold", "0.25"])
-    assert ns.w_corr_threshold == 0.25
 
 
 def test_build_parser_rejects_nonpositive_window() -> None:
@@ -44,60 +38,6 @@ def test_main_rejects_energy_fraction_out_of_range(tmp_path: Path) -> None:
     )
     with pytest.raises(SystemExit) as e:
         main([str(inp), str(out), "--energy-fraction", "1.5"])
-    assert e.value.code == 2
-
-
-def test_main_runs_on_short_flac_with_w_corr_threshold(tmp_path: Path) -> None:
-    """``--w-corr-threshold 0`` is permissive (W entries are in [0,1])."""
-    inp = tmp_path / "iw.flac"
-    out = tmp_path / "ow.flac"
-    rng = np.random.default_rng(42)
-    stereo = (0.01 * rng.standard_normal((120, 2))).astype(np.float64)
-    sf.write(inp, stereo, 48_000, format="FLAC", subtype="PCM_24")
-    main(
-        [
-            str(inp),
-            str(out),
-            "-L",
-            "16",
-            "-k",
-            "8",
-            "--frame-size",
-            "64",
-            "--max-memory-mb",
-            "500",
-            "--w-corr-threshold",
-            "0",
-        ]
-    )
-    assert out.is_file()
-
-
-def test_main_rejects_w_corr_threshold_out_of_range(tmp_path: Path) -> None:
-    inp = tmp_path / "iw.flac"
-    out = tmp_path / "ow.flac"
-    sf.write(
-        inp,
-        np.zeros((120, 2), dtype=np.float64),
-        48_000,
-        format="FLAC",
-        subtype="PCM_24",
-    )
-    with pytest.raises(SystemExit) as e:
-        main(
-            [
-                str(inp),
-                str(out),
-                "-L",
-                "16",
-                "-k",
-                "8",
-                "--frame-size",
-                "64",
-                "--w-corr-threshold",
-                "1.5",
-            ]
-        )
     assert e.value.code == 2
 
 

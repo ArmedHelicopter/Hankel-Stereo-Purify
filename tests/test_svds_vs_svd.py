@@ -1,11 +1,6 @@
-"""svds (partial) vs svd (full) comparison for Wiener weighting.
-
-Tests whether partial SVD can approximate full SVD for Wiener:
-1. Full SVD → Wiener weights on all components (ground truth)
-2. svds top-k → estimate noise from residual energy → Wiener weights
+"""svds (partial) vs svd (full) comparison.
 
 Compares: SNR between outputs, timing.
-
 Usage: cd Hankel-Stereo-Purify && python -m tests.test_svds_vs_svd
 """
 
@@ -20,23 +15,17 @@ import soundfile as sf
 from numpy.typing import NDArray
 from scipy.sparse.linalg import svds
 
-from src.core.stages.d_diagonal import fast_diagonal_average
+from src.core.stages.diagonal import fast_diagonal_average
 
 
-def wiener_full_svd(a: NDArray, noise_fraction: float) -> NDArray:
-    """Wiener via full SVD (ground truth)."""
+def svd_full(a: NDArray) -> NDArray:
+    """Full SVD reconstruction (ground truth)."""
     u, s, vh = scipy.linalg.svd(a, full_matrices=False)
-    k = int(s.size)
-    n_noise = max(1, int(k * noise_fraction))
-    noise_var = float(np.mean(s[-n_noise:] ** 2))
-    s_sq = s * s
-    with np.errstate(divide="ignore", invalid="ignore"):
-        weights = np.where(s_sq > noise_var, 1.0 - noise_var / s_sq, 0.0)
-    return (u * (s * weights)) @ vh
+    return (u * s) @ vh
 
 
-def wiener_svds_partial(a: NDArray, k_probe: int, noise_fraction: float) -> NDArray:
-    """Wiener via partial svds: estimate noise from residual energy."""
+def svds_partial(a: NDArray, k_probe: int) -> NDArray:
+    """Partial svds reconstruction."""
     m, n = a.shape
     mn = min(m, n)
     k = min(k_probe, mn - 1)  # svds needs k < min(m,n)
@@ -47,25 +36,7 @@ def wiener_svds_partial(a: NDArray, k_probe: int, noise_fraction: float) -> NDAr
     order = np.argsort(s_k)[::-1]
     u_k, s_k, vh_k = u_k[:, order], s_k[order], vh_k[order, :]
 
-    # Estimate noise from residual: total_energy - top_k_energy
-    total_energy = float(np.sum(a ** 2))
-    top_k_energy = float(np.sum(s_k ** 2))
-    residual_energy = max(0.0, total_energy - top_k_energy)
-
-    # Number of omitted components
-    n_omit = mn - k
-    if n_omit > 0:
-        noise_var = residual_energy / n_omit
-    else:
-        noise_var = 0.0
-
-    # Wiener weights on the top-k components
-    s_sq = s_k * s_k
-    with np.errstate(divide="ignore", invalid="ignore"):
-        weights = np.where(s_sq > noise_var, 1.0 - noise_var / s_sq, 0.0)
-
-    weighted_s = s_k * weights
-    return (u_k * weighted_s) @ vh_k
+    return (u_k * s_k) @ vh_k
 
 
 def main():
@@ -78,11 +49,10 @@ def main():
     audio, sr = sf.read(str(src), dtype="float64")
     audio = audio[int(sr * 0.5) : int(sr * 1.0)]
 
-    from src.core.stages.a_hankel import hankel_embed
-    from src.core.stages.b_multichannel import combine_hankel_blocks
+    from src.core.stages.hankel import hankel_embed
+    from src.core.stages.multichannel import combine_hankel_blocks
 
     F, L = 1024, 256
-    noise_fraction = 0.1
 
     # Build one frame
     frame = audio[:F]
@@ -90,14 +60,13 @@ def main():
     joint = combine_hankel_blocks(h_l, h_r)
     m, n = joint.shape
     mn = min(m, n)
-    print(f"Matrix: {m}x{n}, min={mn}")
-    print(f"noise_fraction={noise_fraction}\n")
+    print(f"Matrix: {m}x{n}, min={mn}\n")
 
-    # Ground truth: full SVD Wiener
+    # Ground truth: full SVD
     t0 = time.perf_counter()
-    full_out = wiener_full_svd(joint, noise_fraction)
+    full_out = svd_full(joint)
     t_full = time.perf_counter() - t0
-    print(f"Full SVD Wiener: {t_full:.3f}s")
+    print(f"Full SVD: {t_full:.3f}s")
 
     # Partial svds at different k values
     k_values = [8, 16, 32, 64, 128]
@@ -108,7 +77,7 @@ def main():
         if k_probe >= mn:
             continue
         t0 = time.perf_counter()
-        partial_out = wiener_svds_partial(joint, k_probe, noise_fraction)
+        partial_out = svds_partial(joint, k_probe)
         t_partial = time.perf_counter() - t0
 
         diff = full_out - partial_out
@@ -117,11 +86,11 @@ def main():
 
         print(f"{k_probe:>8} {snr:>11.1f}dB {t_partial:>7.3f}s {speedup:>7.1f}x")
 
-    # Also test: full SVD Wiener vs full SVD hard truncation (energy 0.9)
-    print(f"\n--- Wiener vs Energy truncation (full frame pipeline) ---")
+    # Also test: full SVD vs full SVD hard truncation (energy 0.9)
+    print(f"\n--- Full SVD vs Energy truncation (full frame pipeline) ---")
     from src.core.process_frame import process_frame
-    from src.core.stages.c_svd import _EnergySvdStep, _WienerSvdStep
-    from src.core.strategies.truncation import EnergyThresholdStrategy, WienerStrategy
+    from src.core.stages.svd import _EnergySvdStep
+    from src.core.strategies.truncation import EnergyThresholdStrategy
 
     hop = F // 2
     starts = list(range(0, len(audio) - F + 1, hop))
@@ -141,22 +110,13 @@ def main():
         return out
 
     # Energy
-    step_e = _EnergySvdStep(EnergyThresholdStrategy(0.9), w_corr_threshold=None, window_length=L)
+    step_e = _EnergySvdStep(EnergyThresholdStrategy(0.9))
     t0 = time.perf_counter()
     frames_e = [process_frame(s, window_length=L, svd_step=step_e) for s in slices]
     t_e = time.perf_counter() - t0
     energy_out = ola(frames_e)
     snr_e = 10 * np.log10(np.sum(orig ** 2) / np.sum((orig - energy_out) ** 2))
     print(f"Energy (svds partial): SNR={snr_e:.1f}dB time={t_e:.2f}s ({len(slices) / t_e:.0f} f/s)")
-
-    # Wiener full
-    step_w = _WienerSvdStep(WienerStrategy(noise_fraction))
-    t0 = time.perf_counter()
-    frames_w = [process_frame(s, window_length=L, svd_step=step_w) for s in slices]
-    t_w = time.perf_counter() - t0
-    wiener_out = ola(frames_w)
-    snr_w = 10 * np.log10(np.sum(orig ** 2) / np.sum((orig - wiener_out) ** 2))
-    print(f"Wiener (full svd):   SNR={snr_w:.1f}dB time={t_w:.2f}s ({len(slices) / t_w:.0f} f/s)")
 
 
 if __name__ == "__main__":

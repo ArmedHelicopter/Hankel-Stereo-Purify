@@ -1,10 +1,10 @@
 import numpy as np
 from numpy.typing import NDArray
 
-from src.core.stages.a_hankel import hankel_embed
-from src.core.stages.b_multichannel import combine_hankel_blocks
-from src.core.stages.c_svd import make_svd_step
-from src.core.stages.d_diagonal import diagonal_reconstruct
+from src.core.stages.hankel import hankel_embed
+from src.core.stages.multichannel import combine_hankel_blocks
+from src.core.stages.svd import make_svd_step
+from src.core.stages.diagonal import diagonal_reconstruct
 from src.core.strategies.truncation import EnergyThresholdStrategy, FixedRankStrategy
 
 

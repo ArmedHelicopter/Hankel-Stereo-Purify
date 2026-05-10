@@ -108,13 +108,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--w-corr-threshold",
+        "--bypass-freq",
         type=float,
         default=None,
-        metavar="T",
+        metavar="F",
         help=(
-            "Optional MSSA W-correlation filter on singular values after SVD "
-            "(uses -L as window length; adds per-frame cost when set)"
+            "Bandpass filter cutoff in Hz: signals below F bypass SVD (bypass), "
+            "signals above F go through MSSA denoising. "
+            "Based on noise analysis: noise is in high frequencies, low-mid is clean."
         ),
     )
     return parser
@@ -147,9 +148,7 @@ def main(argv: list[str] | None = None) -> None:
                 frame_size=args.frame_size,
                 max_working_memory_bytes=mem_b,
                 max_input_samples=args.max_samples,
-                w_corr_threshold=float(args.w_corr_threshold)
-                if args.w_corr_threshold is not None
-                else None,
+                bypass_freq=args.bypass_freq,
             )
         else:
             purifier = AudioPurifier(
@@ -158,9 +157,7 @@ def main(argv: list[str] | None = None) -> None:
                 frame_size=args.frame_size,
                 max_working_memory_bytes=mem_b,
                 max_input_samples=args.max_samples,
-                w_corr_threshold=float(args.w_corr_threshold)
-                if args.w_corr_threshold is not None
-                else None,
+                bypass_freq=args.bypass_freq,
             )
         mode = (
             f"energy={purifier.energy_fraction}"
