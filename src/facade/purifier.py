@@ -29,6 +29,7 @@ from src.core.exceptions import (
 from src.core.linalg_errors import MSSA_ARPACK_ERRORS, MSSA_LINALG_ERRORS
 from src.core.process_frame import process_frame
 from src.core.stages.svd import make_svd_step
+from src.core.stages.filter import design_filters, split_signal
 from src.core.strategies.truncation import (
     EnergyThresholdStrategy,
     FixedRankStrategy,
@@ -37,7 +38,7 @@ from src.core.strategies.truncation import (
 from src.facade.ola import sqrt_hanning_weights
 from src.facade.pcm_producer import producer_fill_queue
 from src.facade.soundfile_ola import SoundfileOlaEngine
-from src.io.audio_formats import validate_io_paths
+from src.io.audio_formats import validate_io_paths, soundfile_write_kwargs
 from src.io.audio_stream import read_audio_metadata
 from src.io.io_messages import (
     audio_io_failed_pair,
@@ -247,7 +248,6 @@ class AudioPurifier:
 
     def _make_denoise_frame_fn(
         self,
-        sample_rate: int | None = None,
     ) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
         strat: TruncationStrategy
         if self.energy_fraction is not None:
@@ -259,8 +259,6 @@ class AudioPurifier:
             process_frame,
             window_length=self.window_length,
             svd_step=svd_step,
-            sample_rate=sample_rate,
-            bypass_freq=self.bypass_freq,
         )
 
     def _run_processing(self, input_path: str, output_path: str) -> None:
@@ -270,40 +268,84 @@ class AudioPurifier:
         w_sqrt = sqrt_hanning_weights(f_size)[:, np.newaxis]
         w_sq = (w_sqrt * w_sqrt).ravel()
 
-        # Read sample rate for bandpass filter
-        sr = None
-        if self.bypass_freq is not None:
-            sr = read_audio_metadata(input_path).samplerate
-            self.logger.info(
-                "Bandpass filter: bypass <%.0f Hz (sr=%d)", self.bypass_freq, sr
-            )
-
-        denoise_frame = self._make_denoise_frame_fn(sample_rate=sr)
+        denoise_frame = self._make_denoise_frame_fn()
 
         profile = os.environ.get("HSP_PROFILE_OLA", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
+            "1", "true", "yes",
         )
         wall0 = time.perf_counter() if profile else 0.0
 
-        try:
-            self._ola_engine.run_soundfile_ola(
-                input_path,
-                output_path,
-                denoise_frame,
-                f_size,
-                hop,
-                w_sqrt,
-                w_sq,
+        if self.bypass_freq is not None:
+            self._run_with_bandpass(
+                input_path, output_path, denoise_frame, f_size, hop, w_sqrt, w_sq,
             )
-        except (OSError, sf.LibsndfileError) as exc:
-            raise AudioIOError(audio_io_failed_pair(input_path, output_path)) from exc
+        else:
+            try:
+                self._ola_engine.run_soundfile_ola(
+                    input_path, output_path, denoise_frame,
+                    f_size, hop, w_sqrt, w_sq,
+                )
+            except (OSError, sf.LibsndfileError) as exc:
+                raise AudioIOError(audio_io_failed_pair(input_path, output_path)) from exc
 
         if profile:
             self.logger.info(
                 "HSP_PROFILE_OLA wall time: %.3fs",
                 time.perf_counter() - wall0,
             )
-
         self.logger.info("流式数据处理完成")
+
+    def _run_with_bandpass(
+        self,
+        input_path: str,
+        output_path: str,
+        denoise_frame: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+        f_size: int,
+        hop: int,
+        w_sqrt: NDArray[np.float64],
+        w_sq: NDArray[np.float64],
+    ) -> None:
+        """Pre-filter full signal: bypass low band, SVD on high band, recombine."""
+        import tempfile
+
+        sr = read_audio_metadata(input_path)['samplerate']
+        self.logger.info(
+            "Bandpass: bypass <%.0f Hz, SVD on >%.0f Hz (sr=%d)",
+            self.bypass_freq, self.bypass_freq, sr,
+        )
+
+        signal, file_sr = sf.read(input_path, dtype="float64")
+        assert file_sr == sr
+
+        lp_sos, hp_sos = design_filters(self.bypass_freq, sr)
+        low_band, high_band = split_signal(signal, lp_sos, hp_sos)
+
+        self.logger.info(
+            "Low band RMS: %.6f | High band RMS: %.6f",
+            np.sqrt(np.mean(low_band ** 2)),
+            np.sqrt(np.mean(high_band ** 2)),
+        )
+
+        # Write high band to temp, process with OLA+MSSA, read back
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_in = tmp.name
+        tmp_out = tmp_in + "_out.wav"
+        try:
+            sf.write(tmp_in, high_band, sr)
+            self._ola_engine.run_soundfile_ola(
+                tmp_in, tmp_out, denoise_frame, f_size, hop, w_sqrt, w_sq,
+            )
+            processed_high, _ = sf.read(tmp_out, dtype="float64")
+        finally:
+            for p in [tmp_in, tmp_out]:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+
+        # Recombine: bypass low band + processed high band
+        output = low_band + processed_high[: len(low_band)]
+        np.clip(output, -1.0, 1.0, out=output)
+
+        wkwargs = soundfile_write_kwargs(output_path)
+        sf.write(output_path, output, sr, **wkwargs)
