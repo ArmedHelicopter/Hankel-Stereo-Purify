@@ -38,7 +38,27 @@
 * **W-correlation / 能量路径：** 可选 W-correlation 与能量截断的算力与内存阶见 §2.2；能量模式含对同一矩阵的多次 `svds` 探测与可能的全 `svd` 回退，行为由常量帽与浮点容差约束，**非闭式一步解**。
 * **门面异常：** `process_file` 对线性代数与 ARPACK 异常显式映射；`ValueError` 映射为 `ProcessingError` 并记录 `format_exception_origin`；其余未捕获类型落入 `except Exception` 并记完整栈（`logger.exception`），对外仍为泛化文案——**属刻意粗分桶**，排障依赖日志与 `__cause__` 链。包装时使用 **`raise ProcessingError(...) from exc`**：Python 将 `exc` 置于 **`__cause__`**，标准 traceback 以「链式」展示，**并非**丢弃 SciPy/ARPACK 来源；若库调用方坚持「不包一层、直接收到 `LinAlgError`」，属不同 API 契约，当前默认不裸透传。所有经门面包装的 [`ProcessingError`](../src/core/exceptions.py) 均带可机读字段 **`origin_exception_type`**（``module.QualName``，由 [`exception_fully_qualified_name`](../src/core/exceptions.py) 生成），CLI 在失败时额外打印该行，便于区分例如 `builtins.MemoryError` 与未单独映射的数值栈类型。
 
-### 2.6 参数选择经验（实测结论）
+### 2.6 带通滤波预处理架构
+
+基于 Gemini 音频模态分析（见[实验日志](experiment_log.md#2026-05-10-噪声频段分布分析gemini音频模态验证)），确认噪声集中在高频（>2kHz），低中频干净。采用带通滤波+bypass策略：
+
+**处理流程：**
+```
+输入信号 → 低通滤波器(<2kHz) → bypass → 输出拼接
+        → 高通滤波器(>2kHz) → Hankel → SVD截断 → iHankel → 输出拼接
+```
+
+**优势：**
+1. 低频零处理损失：SVD完全不接触干净频段
+2. 降维：高频段数据量远小于全频段，Hankel矩阵更小，SVD更快
+3. SVD假设成立：高频段内，乐音泛音能量高于噪声，能量排序有效
+
+**实现：**
+- 新增 `src/core/stages/e_filter.py`：Butterworth带通滤波器
+- 修改 `src/facade/soundfile_ola.py`：OLA主循环中加入滤波分路
+- 参数：`bypass_freq`（分频点，默认2000Hz），`filter_order`（滤波器阶数，默认4）
+
+### 2.7 参数选择经验（实测结论）
 
 以下基于 Beethoven 钢琴录音（44100Hz stereo MP3）的实测，非理论推导。
 
