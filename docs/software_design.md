@@ -17,7 +17,7 @@
 ### 2.2 截断配置（非经典 Strategy 多态）
 
 * **类型：** [`FixedRankStrategy`](../src/core/strategies/truncation.py) 与 [`EnergyThresholdStrategy`](../src/core/strategies/truncation.py) 为两个独立配置类；`TruncationStrategy` 在源码中为 **`FixedRankStrategy | EnergyThresholdStrategy` 的类型别名**，**不是**抽象基类。`make_svd_step` 在**构造可调用对象时**按具体类型分支，而非运行期虚表派发。
-* **W-correlation（可选）：** 在 `make_svd_step` 内对奇异值向量做过滤；能量模式下首帧可标定保留索引并缓存（见 `c_svd.py`）。算力上：各秩分量经 rank-1 矩阵反对角聚合（实现为逐秩 **`O(m \cdot n)`** 临时块，避免一次性物化完整 `(k,m,n)` 张量），随后 `compute_w_correlation_matrix` 为 **\(O(k^2 \cdot L_{\text{seq}})\)**（\(L_{\text{seq}}=m+n-1\)）；未开启时无此两项。单帧对角阶段占比可用 `python scripts/benchmark_pipeline.py --diag-split` 观察。
+* **默认 BPW 预处理：** `AudioPurifier(...)` 默认做 2kHz bandpass split，高频分支做可逆谱白化后进入 MSSA；旧全频 MSSA 需显式选择（CLI `--fullband` 或 API `bypass_freq=None, highband_whiten=False`）。
 * **可观测性（门面）：** `process_file` 将 MSSA 链上的 `ValueError` 映射为 `ProcessingError` 时，日志含 **`format_exception_origin`** 给出的 `文件名:行号:函数`；CLI 对 `ProcessingError` 额外打印 **`__cause__` 来源**，便于区分 `c_svd` / `d_diagonal` / 配置校验等，而无需解析异常字符串。
 
 ### 2.3 外观 (`AudioPurifier` + `SoundfileOlaEngine`)
@@ -33,30 +33,46 @@
 
 ### 2.5 与架构批判的对照（实现现状，非新增抽象）
 
-* **调度层：** 已移除独立的 Stage 类、`MssaFramePipeline` 与 `AudioPurifierBuilder`；单帧数学链由 [`process_frame`](../src/core/process_frame.py) 直接表达，截断与 W-correlation 逻辑在 [`c_svd.py`](../src/core/stages/c_svd.py) 的 `make_svd_step` 所返回的**可调用对象**内（[`_FixedRankSvdStep`](../src/core/stages/c_svd.py) / [`_EnergySvdStep`](../src/core/stages/c_svd.py)），状态字段见 `_SvdStepState`。
+* **调度层：** 已移除独立的 Stage 类、`MssaFramePipeline` 与 `AudioPurifierBuilder`；单帧数学链由 [`process_frame`](../src/core/process_frame.py) 直接表达，截断逻辑在 [`c_svd.py`](../src/core/stages/c_svd.py) 的 `make_svd_step` 所返回的**可调用对象**内（[`_FixedRankSvdStep`](../src/core/stages/c_svd.py) / [`_EnergySvdStep`](../src/core/stages/c_svd.py)），状态字段见 `_SvdStepState`。
 * **反对角平均：** [`d_diagonal.py`](../src/core/stages/d_diagonal.py) 对固定 `(m,n)` 预计算 `t_flat = i+j`，用 `numpy.bincount` 聚合；仅对 batch 维（如立体声 `B=2`）做 Python 循环，**不再**为全量 scatter 分配 `O(B·mn)` 整型索引表。
-* **W-correlation / 能量路径：** 可选 W-correlation 与能量截断的算力与内存阶见 §2.2；能量模式含对同一矩阵的多次 `svds` 探测与可能的全 `svd` 回退，行为由常量帽与浮点容差约束，**非闭式一步解**。
+* **能量路径：** 能量模式含对同一矩阵的多次 `svds` 探测与可能的全 `svd` 回退，行为由常量帽与浮点容差约束，**非闭式一步解**。
 * **门面异常：** `process_file` 对线性代数与 ARPACK 异常显式映射；`ValueError` 映射为 `ProcessingError` 并记录 `format_exception_origin`；其余未捕获类型落入 `except Exception` 并记完整栈（`logger.exception`），对外仍为泛化文案——**属刻意粗分桶**，排障依赖日志与 `__cause__` 链。包装时使用 **`raise ProcessingError(...) from exc`**：Python 将 `exc` 置于 **`__cause__`**，标准 traceback 以「链式」展示，**并非**丢弃 SciPy/ARPACK 来源；若库调用方坚持「不包一层、直接收到 `LinAlgError`」，属不同 API 契约，当前默认不裸透传。所有经门面包装的 [`ProcessingError`](../src/core/exceptions.py) 均带可机读字段 **`origin_exception_type`**（``module.QualName``，由 [`exception_fully_qualified_name`](../src/core/exceptions.py) 生成），CLI 在失败时额外打印该行，便于区分例如 `builtins.MemoryError` 与未单独映射的数值栈类型。
 
-### 2.6 带通滤波预处理架构
+### 2.6 BPW 默认预处理架构
 
-基于 Gemini 音频模态分析（见[实验日志](experiment_log.md#2026-05-10-噪声频段分布分析gemini音频模态验证)），确认噪声集中在高频（>2kHz），低中频干净。采用带通滤波+bypass策略：
+基于 Gemini 音频模态分析与后续四路/alpha 实验（见[实验日志](experiment_log.md)），当前默认 pipeline 采用 **BPW**：bandpass split + high-band whitening + MSSA。目标是让低中频绕过 SVD，避免硬截断误删主体乐音；高频分支先做可逆噪声谱白化，使 MSSA/SVD 更符合“噪声低能量、乐声结构高能量”的截断先验。
 
 **处理流程：**
-```
-输入信号 → 低通滤波器(<2kHz) → bypass → 输出拼接
-        → 高通滤波器(>2kHz) → Hankel → SVD截断 → iHankel → 输出拼接
+
+```text
+输入信号
+  -> split_signal(cutoff=2000Hz)
+  -> low_band bypass
+  -> high_band
+       -> estimate frequency-only noise profile
+       -> whiten: STFT bin / profile^alpha
+       -> OLA + MSSA
+       -> unwhiten: STFT bin * profile^alpha
+  -> low_band + processed_high
 ```
 
-**优势：**
-1. 低频零处理损失：SVD完全不接触干净频段
-2. 降维：高频段数据量远小于全频段，Hankel矩阵更小，SVD更快
-3. SVD假设成立：高频段内，乐音泛音能量高于噪声，能量排序有效
+**默认参数：**
+
+- `bypass_freq = 2000Hz`
+- `highband_whiten = True`
+- `whiten_alpha = 0.75`
+
+**回退路径：**
+
+- CLI `--fullband` / API `bypass_freq=None, highband_whiten=False`：旧全频 MSSA。
+- CLI `--no-highband-whiten` / API `highband_whiten=False`：裸带通，仅 high band 进入 MSSA。
 
 **实现：**
-- 新增 `src/core/stages/e_filter.py`：Butterworth带通滤波器
-- 修改 `src/facade/soundfile_ola.py`：OLA主循环中加入滤波分路
-- 参数：`bypass_freq`（分频点，默认2000Hz），`filter_order`（滤波器阶数，默认4）
+- `src/core/stages/filter.py`：zero-phase Butterworth low split，`high_band = signal - low_band` 保持可重构。
+- `src/core/stages/whitening.py`：固定频率尺度白化/反白化；不做 mask、阈值、谱减、Wiener 或 bin 删除。
+- `src/facade/purifier.py`：全文件 split 后仅将 high-band 临时 WAV FLOAT 送入现有 OLA+MSSA；白化 artifact 可保存 roundtrip、baseline、diff 和 metrics。
+
+白化本身通过 `roundtrip = unwhiten(whiten(high_band))` 对照验证近似可逆；降噪贡献应归因于白化改变 MSSA 输入能量分布后触发的 SVD 截断，而不是 STFT 预处理直接降噪。
 
 ### 2.7 参数选择经验（实测结论）
 
@@ -159,7 +175,7 @@ diff_*.mp3        — baseline - variant
 
 #### 参数扫描法
 
-对关键参数（如 `energy_fraction`、W-correlation 阈值）取多个值，生成对比文件和 SNR 指标。
+对关键参数（如 `energy_fraction`、`whiten_alpha`）取多个值，生成对比文件和 SNR/高频残留指标。
 
 **流程**：
 1. 固定其他参数，扫目标参数
@@ -167,7 +183,7 @@ diff_*.mp3        — baseline - variant
 3. 画 SNR-参数曲线，找拐点（SNR 不再上升或开始下降的位置）
 4. 听拐点附近的输出，主观验证
 
-**代码位置**：`tests/test_wcorr_sweep.py`（W-correlation 阈值扫描示例）
+**代码位置**：`scripts/run_alpha_sweep_09.py` / `scripts/run_alpha_sweep_09b.py`（白化强度扫描示例）
 
 ## 3. 标准化工程目录映射 (Directory Structure)
 
@@ -181,11 +197,12 @@ src/
 │   │   ├── a_hankel.py
 │   │   ├── b_multichannel.py
 │   │   ├── c_svd.py
-│   │   └── d_diagonal.py
+│   │   ├── d_diagonal.py
+│   │   ├── filter.py
+│   │   └── whitening.py
 │   └── strategies/
 │       ├── truncation.py
-│       ├── windowing.py
-│       └── grouping.py
+│       └── windowing.py
 ├── io/
 ├── facade/
 │   ├── purifier.py           # AudioPurifier、process_file

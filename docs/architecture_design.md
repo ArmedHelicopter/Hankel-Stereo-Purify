@@ -66,6 +66,8 @@ SVD 求解（如 QR 迭代或分治法）属于强迭代数值算法，包含大
 - 输入/输出扩展名由 [`src/io/audio_formats.py`](../src/io/audio_formats.py) **白名单**约束；不根据用户字符串执行外部解码器命令。
 - **同一路径/硬链接**：[`AudioPurifier._validate_paths`](../src/facade/purifier.py) 使用解析路径比较与 `samefile`；若 `samefile` 因权限/跨设备失败则**保守拒绝**（`ConfigurationError`），避免无法判定是否覆盖同一 inode。校验与后续打开之间存在典型 **TOCTOU**（路径被替换）窗口；本地批处理工具按「用户显式路径」信任模型处理，不防恶意同机竞态。
 - **并发**：解码由 [`src/facade/pcm_producer.py`](../src/facade/pcm_producer.py) **生产者线程**推入有界队列；主线程在 [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py)（[`SoundfileOlaEngine`](../src/facade/soundfile_ola.py)，由 [`AudioPurifier`](../src/facade/purifier.py) 组合）侧消费并执行 OLA+MSSA，**毒丸** `None` 结束消费。数值流水线无多线程并行。
+- **默认 BPW 路径**：默认先在门面层做全文件 2kHz split，低频 bypass，高频写入临时 WAV FLOAT 后进入 OLA+MSSA。开启 whitening artifact 时会额外写出 roundtrip、baseline、diff 和 metrics；这些文件应写入 `data/processed/...` 并由 `.gitignore` 排除。
+- **凭据与实验产物**：仓库不需要网络服务或 provider key。Gemini/LLM 评估相关配置、`.env*`、`ccswitch*.json`、`data/processed/**` 与盲听 answer key 均被忽略，避免把 API key 或实验产物提交到远端。
 
 ### 4.2 环境变量（日志与粗测）
 
@@ -80,6 +82,7 @@ SVD 求解（如 QR 迭代或分治法）属于强迭代数值算法，包含大
 ### 4.3 性能主因与帧数估计
 
 - **主 CPU 成本**：每 OLA 帧一次 **SVD 数值步骤**（[`c_svd.py`](../src/core/stages/c_svd.py)）。**固定秩**：`k < min(m,n)` 时优先 `svds`，否则一次 dense `scipy.linalg.svd` 后截断。**能量阈值**：按能量定秩需足够部分谱信息；实现为多次 `svds` 试探并可能退化为一次 dense `scipy.linalg.svd`（最坏与每帧全谱相当），而非必然每帧 full SVD。帧数随 `list_frame_starts(N, frame_size, hop)` 增长；单帧矩阵约为 \(L \times 2K\)（\(K=\) `frame_size` \(-L+1\)），dense 全谱时的渐近阶常记 \(O(\min(L,2K)^3)\) 量级（与 README 一致）。
+- **BPW 额外成本**：默认路径多一次全文件滤波 split；白化路径多 STFT/ISTFT 频率尺度变换。MSSA 仍是主耗时，尤其是 `frame_size=1024, L=256, energy_fraction=0.9` 一类正式实验参数。
 - **脚本**：[`scripts/estimate_ola_frames.py`](../scripts/estimate_ola_frames.py) 打印帧起点个数；可加 `--window-length L` 打印 \(\min(L,2K)\) 供粗算。
 
 ### 4.4 异常分层（面向调用方）

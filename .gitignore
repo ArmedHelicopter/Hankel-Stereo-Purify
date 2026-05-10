@@ -6,8 +6,7 @@ data/raw/**/*.flac
 data/raw/**/*.wav
 data/raw/**/*.mp3
 data/raw/**/*.m4a
-data/processed/**/*.flac
-data/processed/**/*.wav
+data/processed/**
 
 # General binary/media files exceeding 100MB
 *.flac
@@ -67,7 +66,15 @@ wheels/
 *~
 .DS_Store
 .env
+.env.*
 .env.local
+*.env
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+secret/
 
 # ============================================================================
 # Project-Specific Exclusions
@@ -88,6 +95,21 @@ Thumbs.db
 # ==========================================
 # AI Agents, Prompts & Cursor Configurations
 # ==========================================
+
+# Gemini / LLM provider local config and generated evaluations.
+# Never commit provider credentials, proxy settings, blind-listening keys,
+# or API-generated audio-evaluation outputs.
+.ccswitch/
+ccswitch/
+ccswitch*.json
+.gemini/
+gemini*.env
+scripts/*gemini*.py
+*gemini*eval*.json
+gemini_eval*.json
+data/**/gemini*.json
+data/**/gemini_*eval*.json
+data/**/answer_key.json
 
 # 1. Cursor 编辑器本地配置与规则
 .cursor/

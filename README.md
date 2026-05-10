@@ -20,7 +20,7 @@
 | 数据平面 CLI、立体声 PCM（多格式 I/O）、OLA、固定秩或能量阈值截断 | **本仓库 MVP** |
 | Streamlit/EDA 前端（PRD F-05） | **可选**（见下文「可选前端」；异步生产者-消费者流水线仍属二期其他项） |
 
-**W-correlation**：（1）**离线**：[`src/core/strategies/grouping.py`](src/core/strategies/grouping.py) 的 `compute_w_correlation_matrix` 可对分量矩阵做分组评估。（2）**管线内**：[`src/core/stages/c_svd.py`](src/core/stages/c_svd.py) 中 `make_svd_step` 支持 `w_corr_threshold` 与 `window_length`（`L`）。**CLI** 可选 `--w-corr-threshold`（与 `-L` 配合）；**未传该参数时**行为与旧版一致（不做 W 过滤）。库用户可在构造 [`AudioPurifier`](src/facade/purifier.py) 时传入 `w_corr_threshold`。
+**当前默认降噪策略**：CLI 与库 API 默认启用 BPW（2kHz bandpass split + high-band reversible whitening + MSSA）。旧全频 MSSA 可通过 `--fullband` 或 API `bypass_freq=None, highband_whiten=False` 显式恢复。
 
 运行时依赖见 [`requirements.txt`](requirements.txt)（核心栈仅 `numpy` / `scipy` / `soundfile` / `tqdm` / `colorlog`；**未**将 `matplotlib`、`librosa` 纳入核心安装，以减小体积。可选 Streamlit 前端见 [`requirements-frontend.txt`](requirements-frontend.txt)）。
 
@@ -92,7 +92,6 @@ Hankel-Stereo-Purify/                  项目根目录
 │   │   │   ├── c_svd.py
 │   │   │   └── d_diagonal.py
 │   │   └── strategies/
-│   │       ├── grouping.py            W-correlation；管线内可选过滤
 │   │       ├── truncation.py
 │   │       └── windowing.py
 │   ├── facade/
@@ -163,6 +162,19 @@ PYTHONPATH=src python -m src.cli data/raw/sample.flac data/processed/sample_out.
   -L 256 -k 64
 ```
 
+默认处理路径是 **BPW**（bandpass + high-band whitening）：2kHz 以下低频直接 bypass，2kHz 以上高频先做可逆噪声谱白化，再进入 OLA+MSSA，最后反白化并与低频相加。当前默认值为：
+
+```text
+--bypass-freq 2000 --highband-whiten --whiten-alpha 0.75
+```
+
+若需要恢复旧的全频 MSSA，可显式加 `--fullband`：
+
+```bash
+PYTHONPATH=src python -m src.cli data/raw/sample.flac data/processed/sample_fullband.flac \
+  --fullband -L 256 -k 64
+```
+
 能量阈值截断（与 `-k` 互斥）示例：
 
 ```bash
@@ -178,10 +190,32 @@ PYTHONPATH=src python -m src.cli data/raw/sample.flac data/processed/sample_out.
 | `-k` / `--rank` | 固定 SVD 截断秩（**正整数**）；不得超过当前帧下的矩阵秩（facade 会校验）。与 `--energy-fraction` **二选一**；若两者都不写则默认 `k=64` |
 | `--energy-fraction` | 累积奇异值能量阈值，须在 **(0,1]**（CLI 入口校验）；每帧自适应秩（**不能与 `-k` 同用**） |
 | `--frame-size` | OLA 每帧样本数（**正整数**）；默认由 \(L\) 推导，且须 **≥ \(L\)** |
-| `--hop` | 帧移（**正整数**）；默认 `frame_size // 2`，须 **小于 frame_size** |
 | `--max-memory-mb` | OLA 累加器允许占用的内存预算（Mebibytes，**须为正整数**）；超出时对大缓冲使用临时内存映射文件 |
 | `--max-samples` | 若输入**每声道样本数**超过 `N` 则拒绝（可选正整数）；与下方 `HSP_MAX_SAMPLES` 二选一优先级为：**命令行优先** |
-| `--w-corr-threshold` | 可选：管线内 **W-correlation** 阈值（浮点）；启用后每帧额外计算相关矩阵，**耗时显著上升**。与 `-L` 共用同一 Hankel 窗长 |
+| `--bypass-freq` | BPW 分频点，默认 `2000` Hz；低频 bypass，高频进入 MSSA |
+| `--fullband` | 关闭默认 BPW，恢复旧的全频 MSSA 路径 |
+| `--highband-whiten` / `--no-highband-whiten` | 控制高频分支白化；默认开启，`--no-highband-whiten` 可得到裸带通 |
+| `--whiten-alpha` | 高频白化强度，范围 `[0, 1]`，默认 `0.75` |
+| `--whiten-artifact-dir` | 保存 roundtrip、baseline、diff、metrics 等白化实验产物；仅在白化开启时有效 |
+
+Python API 默认与 CLI 对齐：
+
+```python
+from src.facade.purifier import AudioPurifier
+
+purifier = AudioPurifier(256, truncation_rank=64)
+```
+
+上例默认启用 BPW。若库调用方需要旧的全频路径，显式传入：
+
+```python
+purifier = AudioPurifier(
+    256,
+    truncation_rank=64,
+    bypass_freq=None,
+    highband_whiten=False,
+)
+```
 
 **退出码（CLI）**：`0` 成功；`1` 为 `HankelPurifyError` 中除配置类以外的失败（如 I/O、数值处理）；`2` 为 **`ConfigurationError`**（含无效参数组合、路径与输入同文件、以及超过 `--max-samples` / `HSP_MAX_SAMPLES` 等配置性拒绝）。`argparse` 解析失败通常也为非零（多为 `2`）。`KeyboardInterrupt` 不捕获，由 shell 显示为 `130` 等。极少数**未**包装为 `HankelPurifyError` 的异常（例如解释器或依赖在 `build`/`process_file` 之外的故障）仍会以退出码 `1` 结束；默认仅记录简短错误信息，设置 **`HSP_DEBUG=1`** 时 CLI 会打印完整回溯。与 [`process_file`](src/facade/purifier.py) 内部将意外错误映射为 `ProcessingError` 的路径不同。
 
@@ -206,12 +240,12 @@ PYTHONPATH=src python -m src.cli --version
 - **主成本**：每个 OLA 帧在 Hankel 嵌入后需做一次 **SVD 数值步骤**（[`src/core/stages/c_svd.py`](src/core/stages/c_svd.py)）：**固定秩**时优先截断 `svds` 或 dense 截断 SVD；**能量阈值**时依赖累计奇异值能量定秩——实现上通过多次 `svds` 试探（带退避上限），仅在仍不足以判定或触及上限时退化为一次 dense `scipy.linalg.svd`（最坏情况与「每帧全谱」相当）。总时间大致随 **帧数**（由音频长度、`frame_size`、`hop` 决定）线性增长；减小 `hop` 会显著增加帧数与耗时。
 - **内存**：立体声累加缓冲与可选 memmap 见 `--max-memory-mb` 与 PRD NF-01。
 - **可选计时**：设置环境变量 **`HSP_PROFILE_OLA=1`**（或 `true`/`yes`）可在日志中输出整段 `_run_processing` 的 wall time（默认关闭，无额外分支开销可忽略）。
-- **可选 `make_svd_step` 管线内 W-correlation**（`--w-corr-threshold` 或库 API）：冷路径含 rank-1 张量重构、批量反对角平均（与秩 \(k\)、联合块形状 \(m \times n\) 成 **\(O(k \cdot m \cdot n)\)** 量级）与 **\(k \times k\)** 加权相关矩阵（另含与序列长度相关的内积）。**能量自适应秩**下仅在**第一帧**做一次完整 W 标定并冻结保留下标，后续帧只做 \(\sigma\) 掩码（**固定秩**下仍按秩缓存）。**未传该参数时无此开销。** 对比开关前后单帧耗时：`python scripts/benchmark_pipeline.py --w-corr-threshold <0..1>`；观察阶段 D 内 `batched_diagonal_average` 占比：`--diag-split`（见脚本 `--help`）。是否值得做对角内核优化，以 `--diag-split` 输出的墙时占比为准，而非凭直觉。
+- **默认 BPW 额外成本**：默认路径会先对整段音频做一次 2kHz split，并只把高频分支写入临时 WAV FLOAT 后进入 OLA+MSSA。开启高频白化时，还会对高频分支做 STFT/ISTFT 频率尺度变换；该变换本身通过 roundtrip 对照验证为近似可逆，不做 mask、阈值、谱减或 bin 删除。
 
-**帧数与 SVD 次数**：每帧调用一次流水线（含一次 SVD）。令 \(N\) 为样本数、\(F=\) `frame_size`、\(H=\) `hop`，帧起点个数为 \(|\texttt{list\_frame\_starts}(N,F,H)|\)，实现见 [`src/facade/ola.py`](src/facade/ola.py)（最后一帧可能延长以覆盖尾部）。快速查询：
+**帧数与 SVD 次数**：每帧调用一次流水线（含一次 SVD）。令 \(N\) 为样本数、\(F=\) `frame_size`、\(H=F/2\)，帧起点个数为 \(|\texttt{list\_frame\_starts}(N,F,H)|\)，实现见 [`src/facade/ola.py`](src/facade/ola.py)（最后一帧可能延长以覆盖尾部）。快速查询：
 
 ```bash
-PYTHONPATH=src python scripts/estimate_ola_frames.py <num_samples> <frame_size> <hop>
+PYTHONPATH=src python scripts/estimate_ola_frames.py <num_samples> <frame_size> <frame_size/2>
 ```
 
 **单帧 SVD 规模（上界直觉）**：设 Hankel 窗长为 \(L\)（`-L`），OLA 帧长为 \(F\)（`frame_size`），则每声道 Hankel 列数 \(K=F-L+1\)，联合块矩阵形状约为 \(L \times 2K\)。**固定秩**（`-k`）：每帧对联合矩阵做截断 SVD；在 `k < min(行,列)` 时实现优先使用 `scipy.sparse.linalg.svds`，否则一次 dense `scipy.linalg.svd` 后截断（见 `src/core/stages/c_svd.py`）。**能量阈值**（`--energy-fraction`）：每帧需足够奇异值信息以按能量定秩；常见路径为若干次 `svds` 试探，**不一定**每帧都走到 full dense SVD（见 `_energy_truncated_factors`）。在需要 dense 全谱时，渐近阶常记为 \(O\bigl(\min(L,\,2K)^3\bigr)\) 量级（实现依赖 LAPACK）；总耗时还乘以 **帧数**（见上式与 `estimate_ola_frames`）。可用 `scripts/estimate_ola_frames.py --window-length <L>` 在打印帧数的同时打印 \(\min(L,2K)\) 供粗算。
@@ -235,7 +269,7 @@ PYTHONPATH=src python scripts/estimate_ola_frames.py <num_samples> <frame_size> 
 | 项目 | 记录值 |
 |------|--------|
 | 输入 FLAC 大小 / 解码时长 | |
-| 命令行参数（`-L`、`-k`、`--frame-size`、`--hop`、`--max-memory-mb`） | |
+| 命令行参数（`-L`、`-k`/`--energy-fraction`、`--frame-size`、BPW 开关、`--max-memory-mb`） | |
 | Wall time（秒） | |
 | Max RSS（`time -v`） | |
 | 备注（机器内存、磁盘类型） | |
