@@ -19,6 +19,9 @@ from src.facade.purifier import AudioPurifier
 from src.utils.logger import get_logger
 
 _CLI_VERSION = "0.1.0"
+DEFAULT_BYPASS_FREQ = 2_000.0
+DEFAULT_HIGHBAND_WHITEN = True
+DEFAULT_WHITEN_ALPHA = 0.75
 
 
 def _positive_int(name: str) -> Callable[[str], int]:
@@ -110,12 +113,54 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--bypass-freq",
         type=float,
-        default=None,
+        default=DEFAULT_BYPASS_FREQ,
         metavar="F",
         help=(
             "Bandpass filter cutoff in Hz: signals below F bypass SVD (bypass), "
             "signals above F go through MSSA denoising. "
-            "Based on noise analysis: noise is in high frequencies, low-mid is clean."
+            "Based on noise analysis: noise is in high frequencies, low-mid is clean. "
+            f"Default: {DEFAULT_BYPASS_FREQ:g}."
+        ),
+    )
+    parser.add_argument(
+        "--fullband",
+        action="store_true",
+        default=False,
+        help="Disable the default bandpass/BPW path and run full-band MSSA.",
+    )
+    parser.add_argument(
+        "--highband-whiten",
+        dest="highband_whiten",
+        action="store_true",
+        default=None,
+        help=(
+            "Whiten the high-band branch before MSSA and unwhiten afterward "
+            "(default: enabled; requires bandpass)."
+        ),
+    )
+    parser.add_argument(
+        "--no-highband-whiten",
+        dest="highband_whiten",
+        action="store_false",
+        help=("Disable high-band whitening while keeping the bandpass split enabled."),
+    )
+    parser.add_argument(
+        "--whiten-artifact-dir",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Directory for high-band whitening roundtrip/baseline/diff artifacts "
+            "(only with --highband-whiten)."
+        ),
+    )
+    parser.add_argument(
+        "--whiten-alpha",
+        type=float,
+        default=DEFAULT_WHITEN_ALPHA,
+        metavar="A",
+        help=(
+            "Experimental high-band whitening strength in [0, 1] "
+            f"(default: {DEFAULT_WHITEN_ALPHA:g}; only with --highband-whiten)."
         ),
     )
     parser.add_argument(
@@ -131,7 +176,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    return build_parser().parse_args(argv)
+    parser = build_parser()
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw_argv)
+    if args.fullband:
+        if args.bypass_freq != DEFAULT_BYPASS_FREQ:
+            parser.error("--fullband cannot be combined with --bypass-freq.")
+        if "--highband-whiten" in raw_argv:
+            parser.error("--fullband cannot be combined with --highband-whiten.")
+        args.bypass_freq = None
+        args.highband_whiten = False
+    elif args.highband_whiten is None:
+        args.highband_whiten = DEFAULT_HIGHBAND_WHITEN
+    return args
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -158,6 +215,9 @@ def main(argv: list[str] | None = None) -> None:
                 max_working_memory_bytes=mem_b,
                 max_input_samples=args.max_samples,
                 bypass_freq=args.bypass_freq,
+                highband_whiten=args.highband_whiten,
+                whiten_alpha=args.whiten_alpha,
+                whitening_artifact_dir=args.whiten_artifact_dir,
                 use_cuda=args.cuda,
             )
         else:
@@ -168,6 +228,9 @@ def main(argv: list[str] | None = None) -> None:
                 max_working_memory_bytes=mem_b,
                 max_input_samples=args.max_samples,
                 bypass_freq=args.bypass_freq,
+                highband_whiten=args.highband_whiten,
+                whiten_alpha=args.whiten_alpha,
+                whitening_artifact_dir=args.whiten_artifact_dir,
                 use_cuda=args.cuda,
             )
         mode = (

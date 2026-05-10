@@ -7,6 +7,7 @@ numeric stack types need first-class mapping. The final ``except Exception`` is 
 last resort—prefer adding explicit branches over ``__module__`` string checks.
 """
 
+import json
 import os
 import time
 from collections.abc import Callable
@@ -30,6 +31,15 @@ from src.core.linalg_errors import MSSA_ARPACK_ERRORS, MSSA_LINALG_ERRORS
 from src.core.process_frame import process_frame
 from src.core.stages.filter import split_signal
 from src.core.stages.svd import make_svd_step
+from src.core.stages.whitening import (
+    WhiteningProfile,
+    estimate_noise_profile,
+    rms,
+    roundtrip_whiten_signal,
+    snr_db,
+    unwhiten_signal,
+    whiten_signal,
+)
 from src.core.strategies.truncation import (
     EnergyThresholdStrategy,
     FixedRankStrategy,
@@ -93,7 +103,10 @@ class AudioPurifier:
         frame_size: int | None = None,
         max_working_memory_bytes: int = 1_500_000_000,
         max_input_samples: int | None = None,
-        bypass_freq: float | None = None,
+        bypass_freq: float | None = 2_000.0,
+        highband_whiten: bool = True,
+        whiten_alpha: float = 0.75,
+        whitening_artifact_dir: str | Path | None = None,
         use_cuda: bool = False,
     ) -> None:
         if not isinstance(window_length, int) or window_length <= 0:
@@ -126,6 +139,11 @@ class AudioPurifier:
         # OLA — other ratios cause amplitude modulation artifacts (buzzing).
         self.hop_size = max(1, self.frame_size // 2)
         self.bypass_freq = bypass_freq
+        self.highband_whiten = bool(highband_whiten)
+        self.whiten_alpha = float(whiten_alpha)
+        self.whitening_artifact_dir = (
+            Path(whitening_artifact_dir) if whitening_artifact_dir is not None else None
+        )
         self.use_cuda = use_cuda
         self.max_working_memory_bytes = max_working_memory_bytes
         self.max_input_samples = _resolve_max_input_samples(max_input_samples)
@@ -232,6 +250,14 @@ class AudioPurifier:
             raise ConfigurationError("Window length must be a positive integer.")
         if self.frame_size < self.window_length:
             raise ConfigurationError("frame_size must be >= window_length.")
+        if self.highband_whiten and self.bypass_freq is None:
+            raise ConfigurationError(
+                "highband_whiten requires bypass_freq / --bypass-freq."
+            )
+        if self.whitening_artifact_dir is not None and not self.highband_whiten:
+            raise ConfigurationError("whitening_artifact_dir requires highband_whiten.")
+        if self.highband_whiten and not 0.0 <= self.whiten_alpha <= 1.0:
+            raise ConfigurationError("whiten_alpha must be in [0, 1].")
         if self.energy_fraction is not None:
             if not 0.0 < self.energy_fraction <= 1.0:
                 raise ConfigurationError("energy_fraction must be in (0, 1].")
@@ -280,15 +306,20 @@ class AudioPurifier:
         wall0 = time.perf_counter() if profile else 0.0
 
         if self.bypass_freq is not None:
-            self._run_with_bandpass(
-                input_path,
-                output_path,
-                denoise_frame,
-                f_size,
-                hop,
-                w_sqrt,
-                w_sq,
-            )
+            try:
+                self._run_with_bandpass(
+                    input_path,
+                    output_path,
+                    denoise_frame,
+                    f_size,
+                    hop,
+                    w_sqrt,
+                    w_sq,
+                )
+            except (OSError, sf.LibsndfileError) as exc:
+                raise AudioIOError(
+                    audio_io_failed_pair(input_path, output_path)
+                ) from exc
         else:
             try:
                 self._ola_engine.run_soundfile_ola(
@@ -323,11 +354,12 @@ class AudioPurifier:
         w_sq: NDArray[np.float64],
     ) -> None:
         """Pre-filter full signal: bypass low band, SVD on high band, recombine."""
-        import tempfile
-
         bypass_freq = self.bypass_freq
         assert bypass_freq is not None
-        sr = read_audio_metadata(input_path)["samplerate"]
+        try:
+            sr = read_audio_metadata(input_path)["samplerate"]
+        except AudioIOError as exc:
+            raise AudioIOError(audio_io_failed_pair(input_path, output_path)) from exc
         self.logger.info(
             "Bandpass: bypass <%.0f Hz, SVD on >%.0f Hz (sr=%d)",
             bypass_freq,
@@ -346,12 +378,60 @@ class AudioPurifier:
             np.sqrt(np.mean(high_band**2)),
         )
 
-        # Write high band to temp, process with OLA+MSSA, read back
+        if self.highband_whiten:
+            output = self._run_with_whitened_highband(
+                input_path=input_path,
+                output_path=output_path,
+                signal=signal,
+                low_band=low_band,
+                high_band=high_band,
+                samplerate=sr,
+                denoise_frame=denoise_frame,
+                f_size=f_size,
+                hop=hop,
+                w_sqrt=w_sqrt,
+                w_sq=w_sq,
+            )
+        else:
+            processed_high = self._process_high_band_tempfile(
+                high_band,
+                sr,
+                denoise_frame,
+                f_size,
+                hop,
+                w_sqrt,
+                w_sq,
+                write_float=True,
+            )
+            output = low_band + processed_high[: len(low_band)]
+            np.clip(output, -1.0, 1.0, out=output)
+
+        wkwargs = soundfile_write_kwargs(output_path)
+        sf.write(output_path, output, sr, **wkwargs)
+
+    def _process_high_band_tempfile(
+        self,
+        high_band: NDArray[np.float64],
+        samplerate: int,
+        denoise_frame: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+        f_size: int,
+        hop: int,
+        w_sqrt: NDArray[np.float64],
+        w_sq: NDArray[np.float64],
+        *,
+        write_float: bool,
+    ) -> NDArray[np.float64]:
+        """Write a high-band signal to temp WAV, run OLA+MSSA, and read it back."""
+        import tempfile
+
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_in = tmp.name
         tmp_out = tmp_in + "_out.wav"
         try:
-            sf.write(tmp_in, high_band, sr)
+            if write_float:
+                sf.write(tmp_in, high_band, samplerate, format="WAV", subtype="FLOAT")
+            else:
+                sf.write(tmp_in, high_band, samplerate)
             self._ola_engine.run_soundfile_ola(
                 tmp_in,
                 tmp_out,
@@ -361,7 +441,8 @@ class AudioPurifier:
                 w_sqrt,
                 w_sq,
             )
-            processed_high, _ = sf.read(tmp_out, dtype="float64")
+            processed_high, _ = sf.read(tmp_out, dtype="float64", always_2d=True)
+            return np.asarray(processed_high, dtype=np.float64)
         finally:
             for p in [tmp_in, tmp_out]:
                 try:
@@ -369,9 +450,161 @@ class AudioPurifier:
                 except OSError:
                     pass
 
-        # Recombine: bypass low band + processed high band
+    def _run_with_whitened_highband(
+        self,
+        *,
+        input_path: str,
+        output_path: str,
+        signal: NDArray[np.float64],
+        low_band: NDArray[np.float64],
+        high_band: NDArray[np.float64],
+        samplerate: int,
+        denoise_frame: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+        f_size: int,
+        hop: int,
+        w_sqrt: NDArray[np.float64],
+        w_sq: NDArray[np.float64],
+    ) -> NDArray[np.float64]:
+        profile = estimate_noise_profile(high_band, samplerate)
+        whitened_high = whiten_signal(
+            high_band,
+            profile,
+            alpha=self.whiten_alpha,
+        )
+        roundtrip_high = roundtrip_whiten_signal(
+            high_band,
+            profile,
+            alpha=self.whiten_alpha,
+        )
+
+        processed_whitened_high = self._process_high_band_tempfile(
+            whitened_high,
+            samplerate,
+            denoise_frame,
+            f_size,
+            hop,
+            w_sqrt,
+            w_sq,
+            write_float=True,
+        )
+        processed_high = unwhiten_signal(
+            processed_whitened_high[: len(high_band)],
+            profile,
+            alpha=self.whiten_alpha,
+        )
         output = low_band + processed_high[: len(low_band)]
         np.clip(output, -1.0, 1.0, out=output)
 
-        wkwargs = soundfile_write_kwargs(output_path)
-        sf.write(output_path, output, sr, **wkwargs)
+        if self.whitening_artifact_dir is not None:
+            baseline_high = self._process_high_band_tempfile(
+                high_band,
+                samplerate,
+                self._make_denoise_frame_fn(),
+                f_size,
+                hop,
+                w_sqrt,
+                w_sq,
+                write_float=True,
+            )
+            baseline_output = low_band + baseline_high[: len(low_band)]
+            np.clip(baseline_output, -1.0, 1.0, out=baseline_output)
+            roundtrip = low_band + roundtrip_high[: len(low_band)]
+            self._write_whitening_artifacts(
+                input_path=input_path,
+                output_path=output_path,
+                signal=signal,
+                baseline_output=baseline_output,
+                whitened_output=output,
+                roundtrip=roundtrip,
+                profile=profile,
+                samplerate=samplerate,
+            )
+        return output
+
+    def _write_float_wav(
+        self,
+        path: Path,
+        data: NDArray[np.float64],
+        samplerate: int,
+    ) -> None:
+        sf.write(str(path), data, samplerate, format="WAV", subtype="FLOAT")
+
+    def _write_whitening_artifacts(
+        self,
+        *,
+        input_path: str,
+        output_path: str,
+        signal: NDArray[np.float64],
+        baseline_output: NDArray[np.float64],
+        whitened_output: NDArray[np.float64],
+        roundtrip: NDArray[np.float64],
+        profile: WhiteningProfile,
+        samplerate: int,
+    ) -> None:
+        artifact_dir = self.whitening_artifact_dir
+        assert artifact_dir is not None
+        try:
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            self._write_float_wav(
+                artifact_dir / "roundtrip.wav",
+                roundtrip,
+                samplerate,
+            )
+            self._write_float_wav(
+                artifact_dir / "baseline_no_whiten.wav",
+                baseline_output,
+                samplerate,
+            )
+            self._write_float_wav(
+                artifact_dir / "whitened_output.wav",
+                whitened_output,
+                samplerate,
+            )
+            self._write_float_wav(
+                artifact_dir / "diff_baseline_vs_whiten.wav",
+                baseline_output - whitened_output,
+                samplerate,
+            )
+            self._write_float_wav(
+                artifact_dir / "diff_original_vs_whiten.wav",
+                signal - whitened_output,
+                samplerate,
+            )
+            self._write_float_wav(
+                artifact_dir / "diff_original_vs_roundtrip.wav",
+                signal - roundtrip,
+                samplerate,
+            )
+            metrics = {
+                "input_path": input_path,
+                "output_path": output_path,
+                "samplerate": samplerate,
+                "bypass_freq": self.bypass_freq,
+                "whiten_alpha": self.whiten_alpha,
+                "roundtrip_snr_db": snr_db(signal, roundtrip),
+                "roundtrip_diff_rms": rms(signal - roundtrip),
+                "baseline_vs_whiten_snr_db": snr_db(
+                    baseline_output,
+                    whitened_output,
+                ),
+                "baseline_vs_whiten_diff_rms": rms(
+                    baseline_output - whitened_output,
+                ),
+                "original_vs_whiten_snr_db": snr_db(signal, whitened_output),
+                "original_vs_whiten_diff_rms": rms(signal - whitened_output),
+                "profile": {
+                    "nperseg": profile.nperseg,
+                    "noverlap": profile.noverlap,
+                    "percentile": profile.percentile,
+                    "eps": profile.eps,
+                    "min": float(np.min(profile.scale)),
+                    "median": float(np.median(profile.scale)),
+                    "max": float(np.max(profile.scale)),
+                },
+            }
+            with (artifact_dir / "metrics.json").open("w", encoding="utf-8") as fp:
+                json.dump(metrics, fp, indent=2, ensure_ascii=False)
+        except (OSError, sf.LibsndfileError) as exc:
+            raise AudioIOError(
+                f"Failed to write whitening artifacts to {artifact_dir}."
+            ) from exc

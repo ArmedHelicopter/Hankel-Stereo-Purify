@@ -18,6 +18,48 @@ def test_parse_args_defaults() -> None:
     assert ns.window_length == 256
     assert ns.rank is None
     assert ns.energy_fraction is None
+    assert ns.bypass_freq == 2000.0
+    assert ns.highband_whiten is True
+    assert ns.whiten_artifact_dir is None
+    assert ns.whiten_alpha == 0.75
+
+
+def test_parse_args_fullband_disables_default_bpw() -> None:
+    ns = parse_args(["in.flac", "out.flac", "--fullband"])
+    assert ns.fullband is True
+    assert ns.bypass_freq is None
+    assert ns.highband_whiten is False
+
+
+def test_parse_args_no_highband_whiten_keeps_bandpass() -> None:
+    ns = parse_args(["in.flac", "out.flac", "--no-highband-whiten"])
+    assert ns.bypass_freq == 2000.0
+    assert ns.highband_whiten is False
+
+
+def test_parse_args_rejects_fullband_with_highband_whiten() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(["in.flac", "out.flac", "--fullband", "--highband-whiten"])
+
+
+def test_parse_args_highband_whiten_options() -> None:
+    ns = parse_args(
+        [
+            "in.wav",
+            "out.wav",
+            "--bypass-freq",
+            "2000",
+            "--highband-whiten",
+            "--whiten-artifact-dir",
+            "artifacts",
+            "--whiten-alpha",
+            "0.5",
+        ]
+    )
+    assert ns.bypass_freq == 2000.0
+    assert ns.highband_whiten is True
+    assert ns.whiten_artifact_dir == "artifacts"
+    assert ns.whiten_alpha == 0.5
 
 
 def test_build_parser_rejects_nonpositive_window() -> None:
@@ -62,6 +104,64 @@ def test_main_runs_on_short_flac(tmp_path: Path) -> None:
         ]
     )
     assert out.is_file()
+    y, sr = sf.read(out, dtype="float64", always_2d=True)
+    assert sr == 48_000
+    assert y.shape == stereo.shape
+    assert np.all(np.isfinite(y))
+
+
+def test_main_runs_fullband_on_short_flac(tmp_path: Path) -> None:
+    inp = tmp_path / "i.flac"
+    out = tmp_path / "o.flac"
+    rng = np.random.default_rng(43)
+    stereo = (0.01 * rng.standard_normal((120, 2))).astype(np.float64)
+    sf.write(inp, stereo, 48_000, format="FLAC", subtype="PCM_24")
+    main(
+        [
+            str(inp),
+            str(out),
+            "--fullband",
+            "-L",
+            "16",
+            "-k",
+            "8",
+            "--frame-size",
+            "64",
+            "--max-memory-mb",
+            "500",
+        ]
+    )
+    y, sr = sf.read(out, dtype="float64", always_2d=True)
+    assert sr == 48_000
+    assert y.shape == stereo.shape
+    assert np.all(np.isfinite(y))
+
+
+def test_main_runs_no_highband_whiten_on_short_flac(tmp_path: Path) -> None:
+    inp = tmp_path / "i.flac"
+    out = tmp_path / "o.flac"
+    rng = np.random.default_rng(44)
+    stereo = (0.01 * rng.standard_normal((120, 2))).astype(np.float64)
+    sf.write(inp, stereo, 48_000, format="FLAC", subtype="PCM_24")
+    main(
+        [
+            str(inp),
+            str(out),
+            "--no-highband-whiten",
+            "-L",
+            "16",
+            "-k",
+            "8",
+            "--frame-size",
+            "64",
+            "--max-memory-mb",
+            "500",
+        ]
+    )
+    y, sr = sf.read(out, dtype="float64", always_2d=True)
+    assert sr == 48_000
+    assert y.shape == stereo.shape
+    assert np.all(np.isfinite(y))
 
 
 def test_main_hankel_purify_error_exits_1(tmp_path: Path) -> None:
