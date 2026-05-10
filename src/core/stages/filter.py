@@ -1,14 +1,15 @@
 """Bandpass filter: split full signal into low (bypass) and high (SVD) bands.
 
 Uses zero-phase Butterworth IIR filter (sosfiltfilt) on full signal.
-Perfect reconstruction: high_band = signal - low_band (guarantees low + high == original).
+Perfect reconstruction: high_band = signal - low_band, so low + high equals
+the original signal.
 """
 
 from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.signal import butter, sosfiltfilt
+from scipy.signal import butter, sosfiltfilt  # type: ignore[import-untyped]
 
 
 def split_signal(

@@ -28,8 +28,8 @@ from src.core.exceptions import (
 )
 from src.core.linalg_errors import MSSA_ARPACK_ERRORS, MSSA_LINALG_ERRORS
 from src.core.process_frame import process_frame
-from src.core.stages.svd import make_svd_step
 from src.core.stages.filter import split_signal
+from src.core.stages.svd import make_svd_step
 from src.core.strategies.truncation import (
     EnergyThresholdStrategy,
     FixedRankStrategy,
@@ -38,7 +38,7 @@ from src.core.strategies.truncation import (
 from src.facade.ola import sqrt_hanning_weights
 from src.facade.pcm_producer import producer_fill_queue
 from src.facade.soundfile_ola import SoundfileOlaEngine
-from src.io.audio_formats import validate_io_paths, soundfile_write_kwargs
+from src.io.audio_formats import soundfile_write_kwargs, validate_io_paths
 from src.io.audio_stream import read_audio_metadata
 from src.io.io_messages import (
     audio_io_failed_pair,
@@ -106,7 +106,7 @@ class AudioPurifier:
             )
         if len(modes) > 1:
             raise ConfigurationError(
-                "Use exactly one of truncation_rank, energy_fraction."
+                "Use exactly one of truncation_rank, energy_fraction; not both."
             )
 
         self.window_length = window_length
@@ -273,22 +273,37 @@ class AudioPurifier:
         denoise_frame = self._make_denoise_frame_fn()
 
         profile = os.environ.get("HSP_PROFILE_OLA", "").strip().lower() in (
-            "1", "true", "yes",
+            "1",
+            "true",
+            "yes",
         )
         wall0 = time.perf_counter() if profile else 0.0
 
         if self.bypass_freq is not None:
             self._run_with_bandpass(
-                input_path, output_path, denoise_frame, f_size, hop, w_sqrt, w_sq,
+                input_path,
+                output_path,
+                denoise_frame,
+                f_size,
+                hop,
+                w_sqrt,
+                w_sq,
             )
         else:
             try:
                 self._ola_engine.run_soundfile_ola(
-                    input_path, output_path, denoise_frame,
-                    f_size, hop, w_sqrt, w_sq,
+                    input_path,
+                    output_path,
+                    denoise_frame,
+                    f_size,
+                    hop,
+                    w_sqrt,
+                    w_sq,
                 )
             except (OSError, sf.LibsndfileError) as exc:
-                raise AudioIOError(audio_io_failed_pair(input_path, output_path)) from exc
+                raise AudioIOError(
+                    audio_io_failed_pair(input_path, output_path)
+                ) from exc
 
         if profile:
             self.logger.info(
@@ -310,21 +325,25 @@ class AudioPurifier:
         """Pre-filter full signal: bypass low band, SVD on high band, recombine."""
         import tempfile
 
-        sr = read_audio_metadata(input_path)['samplerate']
+        bypass_freq = self.bypass_freq
+        assert bypass_freq is not None
+        sr = read_audio_metadata(input_path)["samplerate"]
         self.logger.info(
             "Bandpass: bypass <%.0f Hz, SVD on >%.0f Hz (sr=%d)",
-            self.bypass_freq, self.bypass_freq, sr,
+            bypass_freq,
+            bypass_freq,
+            sr,
         )
 
         signal, file_sr = sf.read(input_path, dtype="float64")
         assert file_sr == sr
 
-        low_band, high_band = split_signal(signal, self.bypass_freq, sr)
+        low_band, high_band = split_signal(signal, bypass_freq, sr)
 
         self.logger.info(
             "Low band RMS: %.6f | High band RMS: %.6f",
-            np.sqrt(np.mean(low_band ** 2)),
-            np.sqrt(np.mean(high_band ** 2)),
+            np.sqrt(np.mean(low_band**2)),
+            np.sqrt(np.mean(high_band**2)),
         )
 
         # Write high band to temp, process with OLA+MSSA, read back
@@ -334,7 +353,13 @@ class AudioPurifier:
         try:
             sf.write(tmp_in, high_band, sr)
             self._ola_engine.run_soundfile_ola(
-                tmp_in, tmp_out, denoise_frame, f_size, hop, w_sqrt, w_sq,
+                tmp_in,
+                tmp_out,
+                denoise_frame,
+                f_size,
+                hop,
+                w_sqrt,
+                w_sq,
             )
             processed_high, _ = sf.read(tmp_out, dtype="float64")
         finally:

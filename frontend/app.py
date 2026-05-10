@@ -229,7 +229,6 @@ def _run_eda_denoise(
     use_energy: bool,
     rank_or_energy: float,
     frame_size: int | None,
-    hop_size: int | None,
     max_mem_mb: int,
 ) -> NDArray[np.float64]:
     """In-process denoise for **preview segment only** (small arrays)."""
@@ -245,8 +244,6 @@ def _run_eda_denoise(
         kw["truncation_rank"] = int(rank_or_energy)
     if frame_size is not None:
         kw["frame_size"] = frame_size
-    if hop_size is not None:
-        kw["hop_size"] = hop_size
     purifier = AudioPurifier(**kw)
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t_in:
         in_path = Path(t_in.name)
@@ -307,12 +304,6 @@ def main() -> None:
             step=1,
             help="0 表示不传该参数",
         )
-        hop = st.number_input(
-            "--hop（空=默认）",
-            min_value=0,
-            value=0,
-            step=1,
-        )
         max_mem_mb = st.number_input("--max-memory-mb", min_value=1, value=1500, step=1)
         cli_timeout_sec = st.number_input(
             "全量 CLI 子进程超时（秒）",
@@ -323,7 +314,6 @@ def main() -> None:
         )
 
     fs_none = int(frame_size) if int(frame_size) > 0 else None
-    hop_none = int(hop) if int(hop) > 0 else None
 
     tab_eda, tab_full = st.tabs(["录音预览 · 频谱", "全量导出 · CLI"])
 
@@ -369,7 +359,6 @@ def main() -> None:
                                     use_energy=use_energy,
                                     rank_or_energy=rank_or_energy,
                                     frame_size=fs_none,
-                                    hop_size=hop_none,
                                     max_mem_mb=int(max_mem_mb),
                                 )
                             st.success("左：输入 · 右：输出（并排频谱对比）")

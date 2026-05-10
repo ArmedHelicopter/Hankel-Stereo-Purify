@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, cast
 
 import numpy as np
 import scipy.linalg  # type: ignore[import-untyped]
@@ -224,24 +225,6 @@ def _make_svd_step_energy(
     return _EnergySvdStep(strat)
 
 
-def make_svd_step(
-    truncation_strategy: TruncationStrategy,
-) -> Callable[[FloatArray], FloatArray]:
-    """Return a stateful SVD+truncate callable (one per OLA / preview run).
-
-    Dispatches on the concrete strategy type once at construction; the returned
-    callable does not branch on ``isinstance`` per frame.
-    """
-    if isinstance(truncation_strategy, FixedRankStrategy):
-        return _make_svd_step_fixed_rank(truncation_strategy)
-    if isinstance(truncation_strategy, EnergyThresholdStrategy):
-        return _make_svd_step_energy(truncation_strategy)
-    raise TypeError(
-        "truncation_strategy must be FixedRankStrategy or EnergyThresholdStrategy, "
-        f"got {type(truncation_strategy).__name__!r}",
-    )
-
-
 def make_fixed_rank_svd_step(
     truncation_rank: int,
 ) -> Callable[[FloatArray], FloatArray]:
@@ -253,6 +236,7 @@ def make_fixed_rank_svd_step(
 
 # ── CUDA-accelerated SVD step ──────────────────────────────────────────────
 
+
 class _CudaFixedRankSvdStep:
     """Fixed-rank SVD via GPU randomized SVD.  Per-frame upload/download."""
 
@@ -260,18 +244,19 @@ class _CudaFixedRankSvdStep:
 
     def __init__(self, k: int) -> None:
         self._k = k
-        self._ctx = None  # lazy init
+        self._ctx: Any = None  # lazy init
 
     def __call__(self, data: FloatArray) -> FloatArray:
         a = _prepare_svd_frame(data)
         m, n = a.shape  # m = L, n = 2K
         if self._ctx is None:
             from src.cuda.mssa_rand_cuda import CudaRandSvdContext
+
             # C-contiguous (m, n) → column-major (n, m)
             self._ctx = CudaRandSvdContext(m=n, n=m, rank=self._k, oversample=16)
 
         results = self._ctx.run([a])
-        return results[0]
+        return cast(FloatArray, results[0])
 
 
 def make_svd_step(
@@ -295,7 +280,8 @@ def make_svd_step(
     if isinstance(truncation_strategy, FixedRankStrategy):
         if use_cuda:
             try:
-                from src.cuda.mssa_cuda import is_available
+                from src.cuda.mssa_rand_cuda import is_available
+
                 if is_available():
                     return _CudaFixedRankSvdStep(truncation_strategy.k)
             except Exception:
