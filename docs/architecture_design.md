@@ -81,7 +81,7 @@ SVD 求解（如 QR 迭代或分治法）属于强迭代数值算法，包含大
 
 ### 4.3 性能主因与帧数估计
 
-- **主 CPU 成本**：每 OLA 帧一次 **SVD 数值步骤**（[`c_svd.py`](../src/core/stages/c_svd.py)）。**固定秩**：`k < min(m,n)` 时优先 `svds`，否则一次 dense `scipy.linalg.svd` 后截断。**能量阈值**：按能量定秩需足够部分谱信息；实现为多次 `svds` 试探并可能退化为一次 dense `scipy.linalg.svd`（最坏与每帧全谱相当），而非必然每帧 full SVD。帧数随 `list_frame_starts(N, frame_size, hop)` 增长；单帧矩阵约为 \(L \times 2K\)（\(K=\) `frame_size` \(-L+1\)），dense 全谱时的渐近阶常记 \(O(\min(L,2K)^3)\) 量级（与 README 一致）。
+- **主 CPU 成本**：每 OLA 帧一次 **SVD 数值步骤**（[`svd.py`](../src/core/stages/svd.py)）。**固定秩**：`k < min(m,n)` 时优先 `svds`，否则一次 dense `scipy.linalg.svd` 后截断。**能量阈值**：按能量定秩需足够部分谱信息；实现为多次 `svds` 试探并可能退化为一次 dense `scipy.linalg.svd`（最坏与每帧全谱相当），而非必然每帧 full SVD。帧数随 `list_frame_starts(N, frame_size, hop)` 增长；单帧矩阵约为 \(L \times 2K\)（\(K=\) `frame_size` \(-L+1\)），dense 全谱时的渐近阶常记 \(O(\min(L,2K)^3)\) 量级（与 README 一致）。
 - **BPW 额外成本**：默认路径多一次全文件滤波 split；白化路径多 STFT/ISTFT 频率尺度变换。MSSA 仍是主耗时，尤其是 `frame_size=1024, L=256, energy_fraction=0.9` 一类正式实验参数。
 - **脚本**：[`scripts/estimate_ola_frames.py`](../scripts/estimate_ola_frames.py) 打印帧起点个数；可加 `--window-length L` 打印 \(\min(L,2K)\) 供粗算。
 

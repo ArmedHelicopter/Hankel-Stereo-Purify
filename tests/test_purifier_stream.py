@@ -155,7 +155,7 @@ def test_process_file_linalg_failure_maps_to_processing_error(
         raise np.linalg.LinAlgError("mock SVD failure")
 
     # SVD step uses ``svds`` / ``scipy.linalg.svd``, not ``numpy.linalg.svd``.
-    monkeypatch.setattr("src.core.stages.c_svd.svds", _boom)
+    monkeypatch.setattr("src.core.stages.svd.svds", _boom)
     monkeypatch.setattr("scipy.linalg.svd", _boom)
     purifier = _purifier_std()
     with pytest.raises(ProcessingError, match="numerical") as exc_info:
@@ -177,7 +177,7 @@ def test_process_file_arpack_failure_maps_to_processing_error(
     def _arpack_boom(*_a: object, **_k: object) -> None:
         raise ArpackError(0, {0: "mock ARPACK failure"})
 
-    monkeypatch.setattr("src.core.stages.c_svd.svds", _arpack_boom)
+    monkeypatch.setattr("src.core.stages.svd.svds", _arpack_boom)
     monkeypatch.setattr("scipy.linalg.svd", _arpack_boom)
     purifier = _purifier_std()
     with pytest.raises(ProcessingError, match="numerical") as exc_info:

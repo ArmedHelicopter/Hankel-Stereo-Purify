@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Micro-benchmark: A→B→C→D per-frame wall time (perf_counter). No changes to src/.
 
-When ``--cprofile`` is set, stage C runs a cProfile dump; expect
-noticeably higher per-frame time than the default (no W filter), especially in
-energy mode where the first frame pays full W setup.
+When ``--cprofile`` is set, stage C runs a cProfile dump; expect noticeably
+higher per-frame time than the default, especially in energy mode where
+``svds`` probing may make several partial-spectrum attempts.
 
 Use ``--diag-split`` to print what fraction of stage D wall time is
 ``batched_diagonal_average`` vs full ``diagonal_reconstruct`` (same tensor).
@@ -29,13 +29,13 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from src.core.array_types import FloatArray  # noqa: E402
-from src.core.stages.hankel import hankel_embed  # noqa: E402
-from src.core.stages.multichannel import combine_hankel_blocks  # noqa: E402
-from src.core.stages.svd import make_svd_step  # noqa: E402
 from src.core.stages.diagonal import (  # noqa: E402
     batched_diagonal_average,
     diagonal_reconstruct,
 )
+from src.core.stages.hankel import hankel_embed  # noqa: E402
+from src.core.stages.multichannel import combine_hankel_blocks  # noqa: E402
+from src.core.stages.svd import make_svd_step  # noqa: E402
 from src.core.strategies.truncation import (  # noqa: E402
     EnergyThresholdStrategy,
     FixedRankStrategy,

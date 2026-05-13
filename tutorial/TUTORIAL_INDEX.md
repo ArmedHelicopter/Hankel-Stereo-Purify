@@ -8,7 +8,7 @@
 
 | 数学原理 | 代码实现 | 软件工程 | 主要章节 |
 |----------|----------|----------|----------|
-| 解释 Hankel 与一维序列的反对角线对应；写出 \(K=F-L+1\) 及单声道块 \(L\times K\) | 定位 `hankel_embed` 与 `as_strided`；跟读 `test_a_hankel` | 说明视图与 `ascontiguousarray` 的取舍 | 01 |
+| 解释 Hankel 与一维序列的反对角线对应；写出 \(K=F-L+1\) 及单声道块 \(L\times K\) | 定位 `hankel_embed` 与 `as_strided`；跟读 `test_hankel` | 说明视图与 `ascontiguousarray` 的取舍 | 01 |
 | 解释联合块 \([H_L,H_R]\) 与「一次联合 SVD」的动机（相位锁定） | 定位 `combine_hankel_blocks`；单帧链：`process_frame` 内四步顺序 | 指出 PRD F-03 与 `_make_denoise_frame_fn` 绑定 `partial(process_frame, …)` | 02 |
 | 对比固定秩截断与能量阈值的数学假设；说出何时 full SVD | 在 `make_svd_step` 内标出 `FixedRankStrategy` 与能量分支分叉；指认 `(u*s)@vh` | 指认截断配置类型与 `make_svd_step`、能量+W 首帧冻结语义 | 03 |
 | 解释对角平均输出长度 \(L+K-1\) 与联合输出形状 | 定位 `diagonal_reconstruct`、`batched_diagonal_average`（`t=i+j` + `bincount`） | 理解 D 与 OLA 除法不在同一模块的原因 | 04 |
@@ -21,7 +21,7 @@
 
 1. **2 min**：读上表任一行，记下三个文件名待查。
 2. **8 min**：打开 [`src/facade/purifier.py`](../src/facade/purifier.py) 中 `_make_denoise_frame_fn`（返回 `partial(process_frame, ...)`），对照 [`process_frame.py`](../src/core/process_frame.py) 确认 `hankel_embed` → `combine_hankel_blocks` → `make_svd_step(...)` → `diagonal_reconstruct` 的调用顺序。
-3. **10 min**：依次打开 [`a_hankel.py`](../src/core/stages/a_hankel.py) → [`b_multichannel.py`](../src/core/stages/b_multichannel.py) → [`c_svd.py`](../src/core/stages/c_svd.py)（仅看 `make_svd_step` 内分支）→ [`d_diagonal.py`](../src/core/stages/d_diagonal.py)，在纸上画出单帧形状流。
+3. **10 min**：依次打开 [`hankel.py`](../src/core/stages/hankel.py) → [`multichannel.py`](../src/core/stages/multichannel.py) → [`svd.py`](../src/core/stages/svd.py)（仅看 `make_svd_step` 内分支）→ [`diagonal.py`](../src/core/stages/diagonal.py)，在纸上画出单帧形状流。
 4. **10 min — 三处工程决策**（指认即可，不要求背代码）：
    - **背压**：[`src/facade/pcm_producer.py`](../src/facade/pcm_producer.py) 有界队列与 `put` 超时。
    - **白名单 I/O**：[`src/io/audio_formats.py`](../src/io/audio_formats.py) `validate_io_paths` / 后缀集合。
@@ -55,7 +55,7 @@
 | 5 | [05_OLA与流式门面.md](05_OLA与流式门面.md) | 帧、hop、窗；生产者队列与 memmap 决策 |
 | 6 | [06_防御性设计与测试.md](06_防御性设计与测试.md) | 异常类型、可机读包装类型、白名单 I/O、pytest 契约 |
 
-**代码锚点总览**：类型别名 [`src/core/array_types.py`](../src/core/array_types.py) → 阶段 [`src/core/stages/{a_hankel,b_multichannel,c_svd,d_diagonal}.py`](../src/core/stages/) → 单帧组装 [`src/core/process_frame.py`](../src/core/process_frame.py) → 门面 [`src/facade/purifier.py`](../src/facade/purifier.py)（`process_file`、校验、`_make_denoise_frame_fn`）→ 异常元数据 [`src/core/exceptions.py`](../src/core/exceptions.py)（`exception_fully_qualified_name`、`ProcessingError.origin_exception_type`）→ 整文件 OLA/PCM/memmap [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py)（`SoundfileOlaEngine`）+ 生产者 [`src/facade/pcm_producer.py`](../src/facade/pcm_producer.py)。单帧链契约测试：[`tests/test_process_frame.py`](../tests/test_process_frame.py)。
+**代码锚点总览**：类型别名 [`src/core/array_types.py`](../src/core/array_types.py) → 阶段 [`src/core/stages/{hankel,multichannel,svd,diagonal}.py`](../src/core/stages/) → 单帧组装 [`src/core/process_frame.py`](../src/core/process_frame.py) → 门面 [`src/facade/purifier.py`](../src/facade/purifier.py)（`process_file`、校验、`_make_denoise_frame_fn`）→ 异常元数据 [`src/core/exceptions.py`](../src/core/exceptions.py)（`exception_fully_qualified_name`、`ProcessingError.origin_exception_type`）→ 整文件 OLA/PCM/memmap [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py)（`SoundfileOlaEngine`）+ 生产者 [`src/facade/pcm_producer.py`](../src/facade/pcm_producer.py)。单帧链契约测试：[`tests/test_process_frame.py`](../tests/test_process_frame.py)。
 
 ## 可选习题（各一条）
 

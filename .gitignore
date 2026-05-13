@@ -29,6 +29,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.so
 .Python
 env/
 venv/
@@ -65,6 +66,7 @@ wheels/
 *.swo
 *~
 .DS_Store
+*:Zone.Identifier
 .env
 .env.*
 .env.local

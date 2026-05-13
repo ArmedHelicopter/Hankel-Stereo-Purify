@@ -1,20 +1,15 @@
-"""``process_frame`` matches explicit A→D composition."""
+"""``process_frame`` matches explicit MSSA stage composition."""
 
 from functools import partial
 
 import numpy as np
 
-from src.core.pipeline import process_frame as process_frame_reexport
 from src.core.process_frame import process_frame
+from src.core.stages.diagonal import diagonal_reconstruct
 from src.core.stages.hankel import hankel_embed
 from src.core.stages.multichannel import combine_hankel_blocks
 from src.core.stages.svd import make_fixed_rank_svd_step
-from src.core.stages.diagonal import diagonal_reconstruct
 from src.facade.purifier import AudioPurifier
-
-
-def test_pipeline_package_reexports_process_frame() -> None:
-    assert process_frame_reexport is process_frame
 
 
 def test_process_frame_matches_manual_chain() -> None:

@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from .array_types import FloatArray
+from .stages.diagonal import diagonal_reconstruct
 from .stages.hankel import hankel_embed
 from .stages.multichannel import combine_hankel_blocks
-from .stages.diagonal import diagonal_reconstruct
 
 
 def process_frame(

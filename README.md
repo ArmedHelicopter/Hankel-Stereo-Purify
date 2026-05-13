@@ -85,12 +85,11 @@ Hankel-Stereo-Purify/                  项目根目录
 │   │   ├── linalg_errors.py           数值/线性代数异常类型聚合（供门面等）
 │   │   ├── array_types.py             FloatArray 等 ndarray 类型别名
 │   │   ├── process_frame.py           单帧 MSSA（`process_frame`）
-│   │   ├── pipeline/                  无独立 `core/pipeline.py`；仅兼容 re-export `process_frame`
 │   │   ├── stages/
-│   │   │   ├── a_hankel.py
-│   │   │   ├── b_multichannel.py
-│   │   │   ├── c_svd.py
-│   │   │   └── d_diagonal.py
+│   │   │   ├── hankel.py
+│   │   │   ├── multichannel.py
+│   │   │   ├── svd.py
+│   │   │   └── diagonal.py
 │   │   └── strategies/
 │   │       ├── truncation.py
 │   │       └── windowing.py
@@ -237,7 +236,7 @@ PYTHONPATH=src python -m src.cli --version
 
 ### 性能与复杂度（调参直觉）
 
-- **主成本**：每个 OLA 帧在 Hankel 嵌入后需做一次 **SVD 数值步骤**（[`src/core/stages/c_svd.py`](src/core/stages/c_svd.py)）：**固定秩**时优先截断 `svds` 或 dense 截断 SVD；**能量阈值**时依赖累计奇异值能量定秩——实现上通过多次 `svds` 试探（带退避上限），仅在仍不足以判定或触及上限时退化为一次 dense `scipy.linalg.svd`（最坏情况与「每帧全谱」相当）。总时间大致随 **帧数**（由音频长度、`frame_size`、`hop` 决定）线性增长；减小 `hop` 会显著增加帧数与耗时。
+- **主成本**：每个 OLA 帧在 Hankel 嵌入后需做一次 **SVD 数值步骤**（[`src/core/stages/svd.py`](src/core/stages/svd.py)）：**固定秩**时优先截断 `svds` 或 dense 截断 SVD；**能量阈值**时依赖累计奇异值能量定秩——实现上通过多次 `svds` 试探（带退避上限），仅在仍不足以判定或触及上限时退化为一次 dense `scipy.linalg.svd`（最坏情况与「每帧全谱」相当）。总时间大致随 **帧数**（由音频长度、`frame_size`、`hop` 决定）线性增长；减小 `hop` 会显著增加帧数与耗时。
 - **内存**：立体声累加缓冲与可选 memmap 见 `--max-memory-mb` 与 PRD NF-01。
 - **可选计时**：设置环境变量 **`HSP_PROFILE_OLA=1`**（或 `true`/`yes`）可在日志中输出整段 `_run_processing` 的 wall time（默认关闭，无额外分支开销可忽略）。
 - **默认 BPW 额外成本**：默认路径会先对整段音频做一次 2kHz split，并只把高频分支写入临时 WAV FLOAT 后进入 OLA+MSSA。开启高频白化时，还会对高频分支做 STFT/ISTFT 频率尺度变换；该变换本身通过 roundtrip 对照验证为近似可逆，不做 mask、阈值、谱减或 bin 删除。
@@ -248,7 +247,7 @@ PYTHONPATH=src python -m src.cli --version
 PYTHONPATH=src python scripts/estimate_ola_frames.py <num_samples> <frame_size> <frame_size/2>
 ```
 
-**单帧 SVD 规模（上界直觉）**：设 Hankel 窗长为 \(L\)（`-L`），OLA 帧长为 \(F\)（`frame_size`），则每声道 Hankel 列数 \(K=F-L+1\)，联合块矩阵形状约为 \(L \times 2K\)。**固定秩**（`-k`）：每帧对联合矩阵做截断 SVD；在 `k < min(行,列)` 时实现优先使用 `scipy.sparse.linalg.svds`，否则一次 dense `scipy.linalg.svd` 后截断（见 `src/core/stages/c_svd.py`）。**能量阈值**（`--energy-fraction`）：每帧需足够奇异值信息以按能量定秩；常见路径为若干次 `svds` 试探，**不一定**每帧都走到 full dense SVD（见 `_energy_truncated_factors`）。在需要 dense 全谱时，渐近阶常记为 \(O\bigl(\min(L,\,2K)^3\bigr)\) 量级（实现依赖 LAPACK）；总耗时还乘以 **帧数**（见上式与 `estimate_ola_frames`）。可用 `scripts/estimate_ola_frames.py --window-length <L>` 在打印帧数的同时打印 \(\min(L,2K)\) 供粗算。
+**单帧 SVD 规模（上界直觉）**：设 Hankel 窗长为 \(L\)（`-L`），OLA 帧长为 \(F\)（`frame_size`），则每声道 Hankel 列数 \(K=F-L+1\)，联合块矩阵形状约为 \(L \times 2K\)。**固定秩**（`-k`）：每帧对联合矩阵做截断 SVD；在 `k < min(行,列)` 时实现优先使用 `scipy.sparse.linalg.svds`，否则一次 dense `scipy.linalg.svd` 后截断（见 `src/core/stages/svd.py`）。**能量阈值**（`--energy-fraction`）：每帧需足够奇异值信息以按能量定秩；常见路径为若干次 `svds` 试探，**不一定**每帧都走到 full dense SVD（见 `_energy_truncated_factors`）。在需要 dense 全谱时，渐近阶常记为 \(O\bigl(\min(L,\,2K)^3\bigr)\) 量级（实现依赖 LAPACK）；总耗时还乘以 **帧数**（见上式与 `estimate_ola_frames`）。可用 `scripts/estimate_ola_frames.py --window-length <L>` 在打印帧数的同时打印 \(\min(L,2K)\) 供粗算。
 
 ### 环境变量（日志与诊断）
 
@@ -405,10 +404,10 @@ make check
 ### 1. 先理解模块职责
 
 - `src/core/array_types.py`：`FloatArray` 等 ndarray 类型别名（无调度器）
-- `src/core/stages/a_hankel.py`：实现 Hankel 嵌入
-- `src/core/stages/b_multichannel.py`：多通道组合
-- `src/core/stages/c_svd.py`：SVD 分解与截断
-- `src/core/stages/d_diagonal.py`：对角平均化重构
+- `src/core/stages/hankel.py`：实现 Hankel 嵌入
+- `src/core/stages/multichannel.py`：多通道组合
+- `src/core/stages/svd.py`：SVD 分解与截断
+- `src/core/stages/diagonal.py`：对角平均化重构
 - `src/facade/purifier.py`：对外接口与边界校验
 - `src/utils/logger.py`：日志输出工具
 
@@ -422,15 +421,15 @@ make check
 
 本项目推荐使用 TDD：
 
-- 先编写 `tests/test_a_hankel.py` 中的数学与内存共享测试
-- 然后补齐 `src/core/stages/a_hankel.py` 等模块
+- 先编写 `tests/test_hankel.py` 中的数学与内存共享测试
+- 然后补齐 `src/core/stages/hankel.py` 等模块
 
 ---
 
 ## 重要提示
 
 - 本项目使用 `numpy.typing.NDArray[np.float64]`，要求数据类型严格为 **double 精度浮点数**
-- `src/core/stages/a_hankel.py` 中使用 `numpy.lib.stride_tricks.as_strided` 实现零拷贝
+- `src/core/stages/hankel.py` 中使用 `numpy.lib.stride_tricks.as_strided` 实现零拷贝
 - 日志与进度条使用 `src/utils/logger.py` 中的 `TqdmLoggingHandler`
 - CI 已配置 `PYTHONPATH=src`，避免 `from src...` 导入失败
 - 输入与输出不得为同一路径（或硬链接指向同一 inode），否则 `process_file` 会拒绝并抛出 `ConfigurationError`

@@ -1,15 +1,18 @@
 import numpy as np
+from numpy.typing import NDArray
 
-from src.core.stages.hankel import hankel_embed
-from src.core.stages.multichannel import combine_hankel_blocks
 from src.core.stages.diagonal import (
     batched_diagonal_average,
     diagonal_reconstruct,
     fast_diagonal_average,
 )
+from src.core.stages.hankel import hankel_embed
+from src.core.stages.multichannel import combine_hankel_blocks
 
 
-def _diagonal_avg_reference_loops(mats: np.ndarray) -> np.ndarray:
+def _diagonal_avg_reference_loops(
+    mats: NDArray[np.float64],
+) -> NDArray[np.float64]:
     """Explicit nested loops; order matches row-major anti-diagonal traversal."""
     b, m, n = mats.shape
     out = np.zeros((b, m + n - 1), dtype=np.float64)

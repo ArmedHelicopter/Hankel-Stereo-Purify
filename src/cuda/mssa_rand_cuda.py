@@ -32,7 +32,10 @@ def _load_lib() -> ctypes.CDLL | None:
 
         _lib.mssa_rand_svd_init.restype = ctypes.c_int
         _lib.mssa_rand_svd_init.argtypes = [
-            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
         ]
 
         _lib.mssa_rand_svd_cleanup.restype = None
@@ -73,7 +76,11 @@ class CudaRandSvdContext:
     """
 
     def __init__(
-        self, m: int, n: int, rank: int, oversample: int = 16,
+        self,
+        m: int,
+        n: int,
+        rank: int,
+        oversample: int = 16,
     ) -> None:
         lib = _load_lib()
         if lib is None:
@@ -105,30 +112,30 @@ class CudaRandSvdContext:
         if lib is None:
             raise RuntimeError("CUDA randomized SVD library not available.")
 
-        N = len(matrices)
-        if N == 0:
+        n_frames = len(matrices)
+        if n_frames == 0:
             return []
 
         stacked = np.stack(
             [np.ascontiguousarray(A, dtype=np.float64) for A in matrices]
         )
 
-        rc = lib.mssa_rand_svd_upload(stacked.ctypes.data, N)
+        rc = lib.mssa_rand_svd_upload(stacked.ctypes.data, n_frames)
         if rc != 0:
             raise RuntimeError(f"mssa_rand_svd_upload failed: {rc}")
 
-        rc = lib.mssa_rand_svd_run(N)
+        rc = lib.mssa_rand_svd_run(n_frames)
         if rc != 0:
             raise RuntimeError(f"mssa_rand_svd_run failed: {rc}")
 
-        output_buf = np.empty(N * self._m * self._n, dtype=np.float64)
-        rc = lib.mssa_rand_svd_download(output_buf.ctypes.data, N)
+        output_buf = np.empty(n_frames * self._m * self._n, dtype=np.float64)
+        rc = lib.mssa_rand_svd_download(output_buf.ctypes.data, n_frames)
         if rc != 0:
             raise RuntimeError(f"mssa_rand_svd_download failed: {rc}")
 
         # output is column-major m×n per frame = C-contiguous cu_n×cu_m
-        results = output_buf.reshape(N, self._n, self._m)
-        return [results[i].copy() for i in range(N)]
+        results = output_buf.reshape(n_frames, self._n, self._m)
+        return [results[i].copy() for i in range(n_frames)]
 
     def cleanup(self) -> None:
         lib = _load_lib()
