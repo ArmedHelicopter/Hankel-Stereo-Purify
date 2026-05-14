@@ -67,6 +67,7 @@ SVD 求解（如 QR 迭代或分治法）属于强迭代数值算法，包含大
 - **同一路径/硬链接**：[`AudioPurifier._validate_paths`](../src/facade/purifier.py) 使用解析路径比较与 `samefile`；若 `samefile` 因权限/跨设备失败则**保守拒绝**（`ConfigurationError`），避免无法判定是否覆盖同一 inode。校验与后续打开之间存在典型 **TOCTOU**（路径被替换）窗口；本地批处理工具按「用户显式路径」信任模型处理，不防恶意同机竞态。
 - **并发**：解码由 [`src/facade/pcm_producer.py`](../src/facade/pcm_producer.py) **生产者线程**推入有界队列；主线程在 [`src/facade/soundfile_ola.py`](../src/facade/soundfile_ola.py)（[`SoundfileOlaEngine`](../src/facade/soundfile_ola.py)，由 [`AudioPurifier`](../src/facade/purifier.py) 组合）侧消费并执行 OLA+MSSA，**毒丸** `None` 结束消费。数值流水线无多线程并行。
 - **默认 BPW 路径**：默认先在门面层做全文件 2kHz split，低频 bypass，高频写入临时 WAV FLOAT 后进入 OLA+MSSA。开启 whitening artifact 时会额外写出 roundtrip、baseline、diff 和 metrics；这些文件应写入 `data/processed/...` 并由 `.gitignore` 排除。
+- **实验输出路径规范**：可复用实验、盲听包、Gemini/LLM 评估包、benchmark 与中间 WAV 产物必须写入 `data/processed/<short-name>/`。`<short-name>` 使用简短、稳定、ASCII 的目录名，例如 `fw09`、`a09b`、`fm`；长描述、参数 provenance 和解释写入 `summary.json` / `summary.md` 或实验日志。`/tmp` 只允许作为一次性临时 scratch，不作为文档中的规范输出路径。
 - **凭据与实验产物**：仓库不需要网络服务或 provider key。Gemini/LLM 评估相关配置、`.env*`、`ccswitch*.json`、`data/processed/**` 与盲听 answer key 均被忽略，避免把 API key 或实验产物提交到远端。
 
 ### 4.2 环境变量（日志与粗测）

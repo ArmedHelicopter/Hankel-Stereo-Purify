@@ -4,6 +4,27 @@
 
 ---
 
+## 2026-05-13: 实验输出路径规范
+
+### 决策
+
+所有可复用实验输出必须放在 `data/processed/<short-name>/`，并使用简短、稳定、ASCII 的目录名。推荐形式：
+
+- 四路 09 片段：`data/processed/fw09/`
+- alpha sweep：`data/processed/a09/`、`data/processed/a09b/`
+- failure modes：`data/processed/fm/`
+- LLM/Gemini 听感包：放在对应实验目录下，例如 `data/processed/fm/transient_attack/gemini_reference_flash/`
+
+长描述、参数 provenance、完整解释和 answer key 不放进目录名，而写入 `summary.json`、`summary.md`、`manifest.json` 或本文档。
+
+### 约束
+
+- 文档中的命令示例必须使用 `data/processed/...`，不得把 `/tmp/...` 写成规范输出路径。
+- `/tmp` 只允许作为一次性 scratch；如果某次探索先写了 `/tmp`，进入结论或复跑说明前必须迁移或重跑到 `data/processed/<short-name>/`。
+- `data/processed/**` 继续由 `.gitignore` 排除，实验产物不提交。
+
+---
+
 ## 2026-05-10: BPW 默认策略切换
 
 ### 决策
@@ -174,6 +195,21 @@ B > C > A
 - 匿名映射：A = `a50.wav`, B = `a75.wav`, C = `a100.wav`
 - 排名：`B > A > C`
 - 结论仍一致：`a75` 最优；`a50` 更透明但留噪，`a100` 最安静但过度损伤高频空气感/尾音，并引入更明显的不自然伪影。
+
+跨会话配置修复：
+
+- `scripts/prepare_llm_audio_eval.py` 现在会先读取本地 env 文件，再解析
+  CLI 默认值，避免 Gemini/API 配置只存在于某一轮对话上下文。
+- 加载优先级：当前 shell 环境变量最高；然后是显式 `--env-file`；再是
+  `.gemini/hsp_audio_eval.env`、`.env.gemini.local`、`~/.gemini/.env`。
+- 兼容变量名：`GEMINI_MODEL` / `GOOGLE_GEMINI_MODEL`，
+  `GOOGLE_GEMINI_BASE_URL` / `GEMINI_BASE_URL`，
+  `GEMINI_API_KEY` / `GOOGLE_GEMINI_API_KEY` / `GOOGLE_API_KEY`。
+- 本机 `~/.gemini/.env` 与仓库根目录 `.env.gemini.local` 已存在所需
+  变量名；只检查变量名，不记录、不提交 key 值。`.gitignore` 继续忽略
+  `.env*`、`.gemini/`、Gemini 评估 JSON 与 `data/processed/**`。
+- 复跑入口保持无状态：`python scripts/prepare_llm_audio_eval.py --call` 会把
+  音频包和 provider response 写入 `data/processed/.../llm_audio_eval/`。
 
 ### 决策
 
