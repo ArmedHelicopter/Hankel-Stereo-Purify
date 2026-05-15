@@ -38,7 +38,7 @@ python -m pip install -r requirements-frontend.txt
 streamlit run frontend/app.py
 ```
 
-终端会打印本地 URL（多为 `http://localhost:8501`）。[`frontend/app.py`](frontend/app.py) 已将仓库根目录加入 `sys.path`，一般**无需**再设置 `PYTHONPATH=src`。仓库内 [`.streamlit/config.toml`](.streamlit/config.toml) 提供橙白琥珀暗色基底；页面级「录音窗口」复古未来主义样式（含 CRT 扫描线叠层）由 [`frontend/app.py`](frontend/app.py) 注入 CSS，与 PRD F-05 逻辑无关。若在 **WSL2** 中 Windows 浏览器无法打开 `localhost:8501`，优先使用端口转发、SSH tunnel、VPN 或防火墙白名单；只有在受信网络中才可临时使用 `streamlit run frontend/app.py --server.address 0.0.0.0 --server.port 8501`。该前端是本地控制面，会按页面输入读取本机音频路径并写出处理结果，不应裸露到公共网络或不受信局域网。`soundfile` 仍依赖系统已安装的 **libsndfile**（与 CLI 相同；例如 Ubuntu/Debian 常见为 `libsndfile1`，依发行版而定）。
+终端会打印本地 URL（多为 `http://localhost:8501`）。[`frontend/app.py`](frontend/app.py) 已将仓库根目录加入 `sys.path`，一般**无需**再设置 `PYTHONPATH=.`。仓库内 [`.streamlit/config.toml`](.streamlit/config.toml) 提供橙白琥珀暗色基底；页面级「录音窗口」复古未来主义样式（含 CRT 扫描线叠层）由 [`frontend/app.py`](frontend/app.py) 注入 CSS，与 PRD F-05 逻辑无关。若在 **WSL2** 中 Windows 浏览器无法打开 `localhost:8501`，优先使用端口转发、SSH tunnel、VPN 或防火墙白名单；只有在受信网络中才可临时使用 `streamlit run frontend/app.py --server.address 0.0.0.0 --server.port 8501`。该前端是本地控制面，会按页面输入读取本机音频路径并写出处理结果，不应裸露到公共网络或不受信局域网。`soundfile` 仍依赖系统已安装的 **libsndfile**（与 CLI 相同；例如 Ubuntu/Debian 常见为 `libsndfile1`，依发行版而定）。
 
 **能力概要**：
 
@@ -107,7 +107,6 @@ Hankel-Stereo-Purify/                  项目根目录
 │   └── utils/
 │       └── logger.py
 ├── frontend/                          可选 Streamlit（PRD F-05）
-├── tutorial/                          实战教材入口：TUTORIAL_INDEX.md（第 0～6 章）
 ├── scripts/
 │   ├── benchmark_pipeline.py
 │   ├── estimate_ola_frames.py         OLA 帧数 / min(L,2K) 粗算
@@ -129,7 +128,7 @@ Hankel-Stereo-Purify/                  项目根目录
 
 ### 支持的文件格式（CLI / `AudioPurifier`）
 
-输入与输出后缀须为白名单之一（小写不敏感）：**`.flac`、`.wav`、`.aiff`、`.aif`、`.ogg`**。写出时：无损路径为 **PCM_24**（FLAC/WAV/AIFF）；**`.ogg`** 使用 **Vorbis**（有损，与旧版仅 FLAC 时的叙事不同，课程验收可仍只用 `.flac`）。实际能否打开某种容器取决于本机 **libsndfile** 编译选项。代码中可用 `from src.io import libsndfile_build_summary`（或 `python -c "from src.io.sndfile_capabilities import libsndfile_build_summary; print(libsndfile_build_summary())"`，`PYTHONPATH=src`）查看本机暴露的版本/格式列表（可能因 soundfile 版本而为 `None`）。
+输入与输出后缀须为白名单之一（小写不敏感）：**`.flac`、`.wav`、`.aiff`、`.aif`、`.ogg`**。写出时：无损路径为 **PCM_24**（FLAC/WAV/AIFF）；**`.ogg`** 使用 **Vorbis**（有损，与旧版仅 FLAC 时的叙事不同，课程验收可仍只用 `.flac`）。实际能否打开某种容器取决于本机 **libsndfile** 编译选项。代码中可用 `from src.io import libsndfile_build_summary`（或 `python -c "from src.io.sndfile_capabilities import libsndfile_build_summary; print(libsndfile_build_summary())"`，`PYTHONPATH=.`）查看本机暴露的版本/格式列表（可能因 soundfile 版本而为 `None`）。
 
 **与 PRD 的关系**：需求文档 **F-01** 以 FLAC 为主叙事；实现上在相同流式约束下扩展了多种容器，便于试听与对比。
 
@@ -157,7 +156,7 @@ mv ~/Downloads/*.flac data/raw/
 在项目根目录、已安装依赖的前提下，使用 **立体声** 文件（**`.flac` / `.wav` / `.aiff` / `.ogg` 等**，见上表）作为输入。示例仍用 FLAC：
 
 ```bash
-PYTHONPATH=src python -m src.cli data/raw/sample.flac data/processed/sample_out.flac \
+PYTHONPATH=. python -m src.cli data/raw/sample.flac data/processed/sample_out.flac \
   -L 256 -k 64
 ```
 
@@ -170,14 +169,14 @@ PYTHONPATH=src python -m src.cli data/raw/sample.flac data/processed/sample_out.
 若需要恢复旧的全频 MSSA，可显式加 `--fullband`：
 
 ```bash
-PYTHONPATH=src python -m src.cli data/raw/sample.flac data/processed/sample_fullband.flac \
+PYTHONPATH=. python -m src.cli data/raw/sample.flac data/processed/sample_fullband.flac \
   --fullband -L 256 -k 64
 ```
 
 能量阈值截断（与 `-k` 互斥）示例：
 
 ```bash
-PYTHONPATH=src python -m src.cli data/raw/sample.flac data/processed/sample_out.flac \
+PYTHONPATH=. python -m src.cli data/raw/sample.flac data/processed/sample_out.flac \
   -L 256 --energy-fraction 0.95
 ```
 
@@ -221,8 +220,8 @@ purifier = AudioPurifier(
 查看帮助与版本：
 
 ```bash
-PYTHONPATH=src python -m src.cli --help
-PYTHONPATH=src python -m src.cli --version
+PYTHONPATH=. python -m src.cli --help
+PYTHONPATH=. python -m src.cli --version
 ```
 
 与 PRD **NF-01**（峰值常驻内存约 2GB 水位）相关的测量，可在 Linux 上使用 GNU `time` 或仓库脚本（需可执行权限：`chmod +x scripts/run_with_peak_rss.sh`）：
@@ -244,7 +243,7 @@ PYTHONPATH=src python -m src.cli --version
 **帧数与 SVD 次数**：每帧调用一次流水线（含一次 SVD）。令 \(N\) 为样本数、\(F=\) `frame_size`、\(H=F/2\)，帧起点个数为 \(|\texttt{list\_frame\_starts}(N,F,H)|\)，实现见 [`src/facade/ola.py`](src/facade/ola.py)（最后一帧可能延长以覆盖尾部）。快速查询：
 
 ```bash
-PYTHONPATH=src python scripts/estimate_ola_frames.py <num_samples> <frame_size> <frame_size/2>
+PYTHONPATH=. python scripts/estimate_ola_frames.py <num_samples> <frame_size> <frame_size/2>
 ```
 
 **单帧 SVD 规模（上界直觉）**：设 Hankel 窗长为 \(L\)（`-L`），OLA 帧长为 \(F\)（`frame_size`），则每声道 Hankel 列数 \(K=F-L+1\)，联合块矩阵形状约为 \(L \times 2K\)。**固定秩**（`-k`）：每帧对联合矩阵做截断 SVD；在 `k < min(行,列)` 时实现优先使用 `scipy.sparse.linalg.svds`，否则一次 dense `scipy.linalg.svd` 后截断（见 `src/core/stages/svd.py`）。**能量阈值**（`--energy-fraction`）：每帧需足够奇异值信息以按能量定秩；常见路径为若干次 `svds` 试探，**不一定**每帧都走到 full dense SVD（见 `_energy_truncated_factors`）。在需要 dense 全谱时，渐近阶常记为 \(O\bigl(\min(L,\,2K)^3\bigr)\) 量级（实现依赖 LAPACK）；总耗时还乘以 **帧数**（见上式与 `estimate_ola_frames`）。可用 `scripts/estimate_ola_frames.py --window-length <L>` 在打印帧数的同时打印 \(\min(L,2K)\) 供粗算。
@@ -331,13 +330,13 @@ python -m pip show pytest
 ### 本地运行测试
 
 ```bash
-PYTHONPATH=src python -m pytest tests/
+PYTHONPATH=. python -m pytest tests/
 ```
 
 ### 运行类型检查
 
 ```bash
-PYTHONPATH=src python -m mypy src/ tests/
+PYTHONPATH=. python -m mypy src/ tests/
 ```
 
 ### 运行代码风格检查
@@ -356,7 +355,7 @@ python -m ruff check .
 make check
 ```
 
-默认 GitHub Actions 步骤见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)（`ruff check`、`mypy src/ tests/`、`pytest tests/`）。
+默认 GitHub Actions 步骤见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)（`ruff check`、`python -m mypy src/ tests/`、`python -m pytest tests/`）。
 
 （`make format` 仅做 `ruff format`，不包含在 `check` 中，以免改动工作区未保存内容。）
 
@@ -391,11 +390,11 @@ make check
 
 ---
 
-## 为什么要加 `PYTHONPATH=src`
+## 为什么要加 `PYTHONPATH=.`
 
 项目源码放在 `src/` 目录下，测试代码使用 `from src...` 方式导入。
 
-如果不设置 `PYTHONPATH=src`，Python 可能找不到 `src` 包，从而出现导入失败。
+如果不设置 `PYTHONPATH=.`, Python 可能找不到仓库根目录下的 `src` 包，从而出现导入失败。不要使用 `PYTHONPATH=src` 跑 mypy：它会让本项目的 `src/io` 遮蔽 Python 标准库 `io`。
 
 ---
 
@@ -431,7 +430,7 @@ make check
 - 本项目使用 `numpy.typing.NDArray[np.float64]`，要求数据类型严格为 **double 精度浮点数**
 - `src/core/stages/hankel.py` 中使用 `numpy.lib.stride_tricks.as_strided` 实现零拷贝
 - 日志与进度条使用 `src/utils/logger.py` 中的 `TqdmLoggingHandler`
-- CI 已配置 `PYTHONPATH=src`，避免 `from src...` 导入失败
+- CI 已配置 `PYTHONPATH=.`, 避免 `from src...` 导入失败，同时避免 `src/io` 遮蔽标准库 `io`
 - 输入与输出不得为同一路径（或硬链接指向同一 inode），否则 `process_file` 会拒绝并抛出 `ConfigurationError`
 - 路径校验与打开文件之间存在通常的 TOCTOU 窗口；本工具按本地显式路径使用场景设计，不防御恶意同机路径竞态
 
@@ -439,6 +438,5 @@ make check
 
 ## 推荐阅读
 
-- [`tutorial/TUTORIAL_INDEX.md`](tutorial/TUTORIAL_INDEX.md)：代码锚点与三十分钟跟读路径（面向学习与验收）
 - [`docs/prd.md`](docs/prd.md)：产品需求与算法说明
 - `docs/MSSA 声学信号去噪.pdf`：MSSA 理论参考

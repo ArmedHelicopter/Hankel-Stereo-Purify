@@ -7,8 +7,8 @@ of per-frame SVD problem size (see README "单帧 SVD 规模").
 
 Example::
 
-    PYTHONPATH=src python scripts/estimate_ola_frames.py 480000 512 256
-    PYTHONPATH=src python scripts/estimate_ola_frames.py 480000 512 256 -L 256
+    PYTHONPATH=. python scripts/estimate_ola_frames.py 480000 512 256
+    PYTHONPATH=. python scripts/estimate_ola_frames.py 480000 512 256 -L 256
 """
 
 from __future__ import annotations

@@ -21,6 +21,7 @@ import soundfile as sf
 from numpy.typing import NDArray
 from tqdm import tqdm
 
+from src.core.array_types import FloatArray
 from src.core.exceptions import AudioIOError, ConfigurationError
 from src.facade.ola import list_frame_starts
 from src.facade.pcm_producer import (
@@ -79,12 +80,12 @@ class SoundfileOlaEngine:
         *,
         pcm_queue: Queue[NDArray[np.float64] | None],
         producer_error: list[BaseException],
-        buf: NDArray[np.float64],
+        buf: FloatArray,
         buffer_base: int,
         need_global_end: int,
-    ) -> NDArray[np.float64]:
+    ) -> FloatArray:
         """从队列拉取块并拼接到 ``buf``，直至覆盖全局样本下标 ``need_global_end``。"""
-        out = buf
+        out: FloatArray = buf
         while buffer_base + int(out.shape[0]) < need_global_end:
             item = pcm_queue.get()
             if item is None:
@@ -225,7 +226,7 @@ class SoundfileOlaEngine:
         x_win_buf = np.zeros((f_size, 2), dtype=np.float64)
         weighted_buf = np.zeros((f_size, 2), dtype=np.float64)
         buffer_base = 0
-        buf = np.empty((0, 2), dtype=np.float64)
+        buf: FloatArray = np.empty((0, 2), dtype=np.float64)
 
         with tqdm(
             total=len(starts),

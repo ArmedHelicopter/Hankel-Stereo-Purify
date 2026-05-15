@@ -13,7 +13,7 @@ def _run_cli(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[st
     return subprocess.run(
         [sys.executable, "-m", "src.cli", *args],
         cwd=repo_root,
-        env={**os.environ, "PYTHONPATH": "src"},
+        env={**os.environ, "PYTHONPATH": str(repo_root)},
         check=False,
         capture_output=True,
         text=True,
@@ -84,7 +84,7 @@ def test_cli_rejects_long_input_via_hsp_max_samples_env_only(tmp_path: Path) -> 
         subtype="PCM_24",
     )
     repo_root = Path(__file__).resolve().parents[1]
-    env = {**os.environ, "PYTHONPATH": "src", "HSP_MAX_SAMPLES": "50"}
+    env = {**os.environ, "PYTHONPATH": str(repo_root), "HSP_MAX_SAMPLES": "50"}
     proc = subprocess.run(
         [
             sys.executable,

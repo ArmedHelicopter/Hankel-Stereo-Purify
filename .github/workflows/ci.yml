@@ -13,6 +13,7 @@ jobs:
     
     # 策略：测试多个 Python 版本，这里以最低支持 3.10 为基准
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11"]
 
@@ -41,14 +42,14 @@ jobs:
 
     - name: Static Type Checking (Mypy)
       env:
-        PYTHONPATH: src
+        PYTHONPATH: .
       run: |
         # 运行严格的静态类型检查，确保 FloatArray 等张量契约未被破坏
-        mypy src/ tests/
+        python -m mypy src/ tests/
 
     - name: Mathematical & Memory Baselines (Pytest)
       env:
-        PYTHONPATH: src
+        PYTHONPATH: .
       run: |
         # 运行测试驱动框架，重点验证零拷贝 (np.shares_memory) 和数学准确性
-        pytest tests/
+        python -m pytest tests/

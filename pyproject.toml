@@ -26,6 +26,7 @@ module = [
     "streamlit",
     "matplotlib",
     "matplotlib.pyplot",
+    "matplotlib.axes",
 ]
 ignore_missing_imports = true
 
