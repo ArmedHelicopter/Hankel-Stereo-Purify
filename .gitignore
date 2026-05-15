@@ -109,6 +109,7 @@ gemini*.env
 scripts/*gemini*.py
 *gemini*eval*.json
 gemini_eval*.json
+docs/Hankel-Stereo-Purify.json
 data/**/gemini*.json
 data/**/gemini_*eval*.json
 data/**/answer_key.json

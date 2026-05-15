@@ -38,7 +38,7 @@ python -m pip install -r requirements-frontend.txt
 streamlit run frontend/app.py
 ```
 
-终端会打印本地 URL（多为 `http://localhost:8501`）。[`frontend/app.py`](frontend/app.py) 已将仓库根目录加入 `sys.path`，一般**无需**再设置 `PYTHONPATH=src`。仓库内 [`.streamlit/config.toml`](.streamlit/config.toml) 提供橙白琥珀暗色基底；页面级「录音窗口」复古未来主义样式（含 CRT 扫描线叠层）由 [`frontend/app.py`](frontend/app.py) 注入 CSS，与 PRD F-05 逻辑无关。若在 **WSL2** 中 Windows 浏览器无法打开 `localhost:8501`，可尝试 `streamlit run frontend/app.py --server.address 0.0.0.0 --server.port 8501` 后用 WSL 的局域网地址访问，或检查防火墙与端口转发。`soundfile` 仍依赖系统已安装的 **libsndfile**（与 CLI 相同；例如 Ubuntu/Debian 常见为 `libsndfile1`，依发行版而定）。
+终端会打印本地 URL（多为 `http://localhost:8501`）。[`frontend/app.py`](frontend/app.py) 已将仓库根目录加入 `sys.path`，一般**无需**再设置 `PYTHONPATH=src`。仓库内 [`.streamlit/config.toml`](.streamlit/config.toml) 提供橙白琥珀暗色基底；页面级「录音窗口」复古未来主义样式（含 CRT 扫描线叠层）由 [`frontend/app.py`](frontend/app.py) 注入 CSS，与 PRD F-05 逻辑无关。若在 **WSL2** 中 Windows 浏览器无法打开 `localhost:8501`，优先使用端口转发、SSH tunnel、VPN 或防火墙白名单；只有在受信网络中才可临时使用 `streamlit run frontend/app.py --server.address 0.0.0.0 --server.port 8501`。该前端是本地控制面，会按页面输入读取本机音频路径并写出处理结果，不应裸露到公共网络或不受信局域网。`soundfile` 仍依赖系统已安装的 **libsndfile**（与 CLI 相同；例如 Ubuntu/Debian 常见为 `libsndfile1`，依发行版而定）。
 
 **能力概要**：
 
